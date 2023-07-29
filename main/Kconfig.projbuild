@@ -48,14 +48,7 @@ menu "Example Connection Configuration"
             Choose this option to connect with WiFi
 
     if EXAMPLE_CONNECT_WIFI
-        config EXAMPLE_WIFI_SSID_PWD_FROM_STDIN
-            bool "Get ssid and password from stdin"
-            default n
-            help
-                Give the WiFi SSID and password from stdin.
-
         config EXAMPLE_PROVIDE_WIFI_CONSOLE_CMD
-            depends on !EXAMPLE_WIFI_SSID_PWD_FROM_STDIN
             bool "Provide wifi connect commands"
             default y
             help

@@ -1,2 +1,10 @@
-idf_component_register(SRCS "main.c"
-                    INCLUDE_DIRS ".")
+idf_component_register(
+SRCS
+    "main.c"
+    "connect.c"
+    "protocol_examples_utils.c"
+    "wifi_connect.c"
+INCLUDE_DIRS
+    "."
+    "include"
+)

@@ -1,0 +1,3 @@
+[submodule "Emci"]
+	path = Emci
+	url = https://github.com/m1ke02/Emci.git

@@ -1,6 +1,7 @@
 idf_component_register(
 SRCS
     "main.c"
+    "tcp_server.c"
     "connect.c"
     "protocol_examples_utils.c"
     "wifi_connect.c"

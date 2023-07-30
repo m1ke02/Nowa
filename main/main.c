@@ -24,6 +24,7 @@
 #include "lwip/sys.h"
 #include <lwip/netdb.h>
 
+#include "emci_parser.h"
 
 #define PORT                        CONFIG_EXAMPLE_PORT
 #define KEEPALIVE_IDLE              CONFIG_EXAMPLE_KEEPALIVE_IDLE
@@ -32,34 +33,7 @@
 
 static const char *TAG = "example";
 
-static void do_retransmit(const int sock)
-{
-    int len;
-    char rx_buffer[128];
-
-    do {
-        len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
-        if (len < 0) {
-            ESP_LOGE(TAG, "Error occurred during receiving: errno %d", errno);
-        } else if (len == 0) {
-            ESP_LOGW(TAG, "Connection closed");
-        } else {
-            rx_buffer[len] = 0; // Null-terminate whatever is received and treat it like a string
-            ESP_LOGI(TAG, "Received %d bytes: %s", len, rx_buffer);
-
-            // send() can return less bytes than supplied length.
-            // Walk-around for robust implementation.
-            int to_write = len;
-            while (to_write > 0) {
-                int written = send(sock, rx_buffer + (len - to_write), to_write, 0);
-                if (written < 0) {
-                    ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-                }
-                to_write -= written;
-            }
-        }
-    } while (len > 0);
-}
+emci_env_t emci_env;
 
 static void tcp_server_task(void *pvParameters)
 {
@@ -147,7 +121,11 @@ static void tcp_server_task(void *pvParameters)
 #endif
         ESP_LOGI(TAG, "Socket accepted ip address: %s", addr_str);
 
-        do_retransmit(sock);
+        emci_socket = sock;
+        ESP_LOGI(TAG, "emci_main_loop started");
+        emci_main_loop(&emci_env);
+        emci_socket = -1;
+        ESP_LOGI(TAG, "emci_main_loop finished");
 
         shutdown(sock, 0);
         close(sock);

@@ -5,8 +5,5 @@
 		}
 	],
 	"settings": {
-		"files.associations": {
-			"freertos.h": "c"
-		}
 	},
 }

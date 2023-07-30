@@ -4,7 +4,12 @@ SRCS
     "connect.c"
     "protocol_examples_utils.c"
     "wifi_connect.c"
+    "emci_profile.c"
+    "../Emci/src/emci_arg.c"
+    "../Emci/src/emci_parser.c"
+    "../Emci/src/emci_std_handlers.c"
 INCLUDE_DIRS
     "."
     "include"
+    "../Emci/include"
 )

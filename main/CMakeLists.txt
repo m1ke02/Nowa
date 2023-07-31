@@ -9,6 +9,8 @@ SRCS
     "../Emci/src/emci_arg.c"
     "../Emci/src/emci_parser.c"
     "../Emci/src/emci_std_handlers.c"
+    "ble_ancs_utils.c"
+    "ancs.c"
 INCLUDE_DIRS
     "."
     "include"

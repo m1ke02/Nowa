@@ -22,7 +22,11 @@ const emci_command_t cmd_array[] =
 
     {"help", emci_help_handler, "s", 1,
     NULL,
-    "Display this message", "cmd"}
+    "Display this message", "cmd"},
+
+    {"exit", emci_exit_handler, "", 0,
+    NULL,
+    "Exit command session", NULL}
 };
 
 const uint_fast8_t cmd_array_length = (sizeof(cmd_array) / sizeof(emci_command_t));

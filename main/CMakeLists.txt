@@ -11,6 +11,7 @@ SRCS
     "../Emci/src/emci_std_handlers.c"
     "ble_ancs_utils.c"
     "ancs.c"
+    "ble_utils.c"
 INCLUDE_DIRS
     "."
     "include"

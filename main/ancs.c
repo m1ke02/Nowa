@@ -33,7 +33,6 @@
 #define PROFILE_NUM                               4
 #define ADV_CONFIG_FLAG                           (1 << 0)
 #define SCAN_RSP_CONFIG_FLAG                      (1 << 1)
-#define INVALID_HANDLE                            0
 static uint8_t adv_config_done = 0;
 static void periodic_timer_callback(void* arg);
 
@@ -48,15 +47,13 @@ struct data_source_buffer {
     uint16_t len;
 };
 
-//In its basic form, the ANCS exposes three characteristics:
-// service UUID: 7905F431-B5CE-4E99-A40F-4B1E122D00D0
-// uint8_t Apple_NC_UUID[16] = {0xD0, 0x00, 0x2D, 0x12, 0x1E, 0x4B, 0x0F, 0xA4, 0x99, 0x4E, 0xCE, 0xB5, 0x31, 0xF4, 0x05, 0x79};
-// // Notification Source UUID: 9FBF120D-6301-42D9-8C58-25E699A21DBD(notifiable)
-// uint8_t notification_source[16] = {0xbd, 0x1d, 0xa2, 0x99, 0xe6, 0x25, 0x58, 0x8c, 0xd9, 0x42, 0x01, 0x63, 0x0d, 0x12, 0xbf, 0x9f};
-// // Control Point UUID:69D1D8F3-45E1-49A8-9821-9BBDFDAAD9D9(writeable with response)
-// uint8_t control_point[16] = {0xd9, 0xd9, 0xaa, 0xfd, 0xbd, 0x9b, 0x21, 0x98, 0xa8, 0x49, 0xe1, 0x45, 0xf3, 0xd8, 0xd1, 0x69};
-// // Data Source UUID:22EAC6E9-24D6-4BB5-BE44-B36ACE7C7BFB(notifiable)
-// uint8_t data_source[16] = {0xfb, 0x7b, 0x7c, 0xce, 0x6a, 0xb3, 0x44, 0xbe, 0xb5, 0x4b, 0xd6, 0x24, 0xe9, 0xc6, 0xea, 0x22};
+// ANCS UUID: 7905F431-B5CE-4E99-A40F-4B1E122D00D0
+// In its basic form, the ANCS exposes three characteristics:
+// Notification Source UUID: 9FBF120D-6301-42D9-8C58-25E699A21DBD (notifiable)
+// Control Point UUID: 69D1D8F3-45E1-49A8-9821-9BBDFDAAD9D9 (writeable with response)
+// Data Source UUID: 22EAC6E9-24D6-4BB5-BE44-B36ACE7C7BFB (notifiable)
+// Note: There may be more characteristics present in the ANCS than the three listed above.
+// That said, an NC may ignore any characteristic it does not recognize.
 
 static const esp_bt_uuid_t notification_source_char_uuid = {
     .len = ESP_UUID_LEN_128,
@@ -72,10 +69,6 @@ static const esp_bt_uuid_t data_source_char_uuid = {
     .len = ESP_UUID_LEN_128,
     .uuid.uuid128 = {0xfb, 0x7b, 0x7c, 0xce, 0x6a, 0xb3, 0x44, 0xbe, 0xb5, 0x4b, 0xd6, 0x24, 0xe9, 0xc6, 0xea, 0x22}
 };
-
-/*
-Note: There may be more characteristics present in the ANCS than the three listed above. That said, an NC may ignore any characteristic it does not recognize.
-*/
 
 static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
 
@@ -145,11 +138,6 @@ struct gattc_profile_inst {
         esp_gattc_char_elem_t notification_source_char_elem;
         esp_gattc_char_elem_t data_source_char_elem;
         esp_gattc_char_elem_t control_point_char_elem;
-        // uint16_t notification_source_handle;
-        // uint16_t data_source_handle;
-        // uint16_t contol_point_handle;
-        // esp_gattc_char_elem_t *char_elem_result;
-        esp_gattc_descr_elem_t *descr_elem_result;
     } anc;
     struct {
         uint16_t service_start_handle;
@@ -797,7 +785,7 @@ void init_timer(int idx)
     ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &gl_profile_tab[idx].periodic_timer));
 }
 
-esp_err_t ancs_init (void)
+esp_err_t ancs_init(void)
 {
     esp_err_t ret;
 
@@ -902,4 +890,28 @@ esp_err_t ancs_init (void)
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(uint8_t));
 
     return ESP_OK;
+}
+
+void ancs_dump_device_list(FILE *stream, const char *endl) {
+    bool empty = true;
+    for (int idx = 0; idx < PROFILE_NUM; idx ++) {
+        if (memcmp(gl_profile_tab[idx].remote_bda, "\x00\x00\x00\x00\x00\x00", 6) != 0) {
+            empty = false;
+            fprintf(stream, "[%i] %04x %s @ %02x:%02x:%02x:%02x:%02x:%02x%s",
+                idx+1,
+                gl_profile_tab[idx].appearance,
+                gl_profile_tab[idx].device_name,
+                gl_profile_tab[idx].remote_bda[0],
+                gl_profile_tab[idx].remote_bda[1],
+                gl_profile_tab[idx].remote_bda[2],
+                gl_profile_tab[idx].remote_bda[3],
+                gl_profile_tab[idx].remote_bda[4],
+                gl_profile_tab[idx].remote_bda[5],
+                endl
+            );
+        }
+    }
+    if (empty) {
+        fprintf(stream, "<No devices>%s", endl);
+    }
 }

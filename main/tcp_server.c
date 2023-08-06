@@ -1,5 +1,6 @@
 #include <string.h>
 #include <sys/param.h>
+#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_system.h"
@@ -8,6 +9,8 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_netif.h"
+#include "esp_vfs.h"
+#include "esp_err.h"
 #include "protocol_examples_common.h"
 
 #include "lwip/err.h"
@@ -23,11 +26,50 @@
 #define KEEPALIVE_COUNT             CONFIG_EXAMPLE_KEEPALIVE_COUNT
 
 static const char *TAG = "tcp_server";
+static int client_socket = -1;
+static emci_env_t emci_env;
 
-emci_env_t emci_env;
+static ssize_t client_vfs_write(int fd, const void * data, size_t size);
+static int client_vfs_open(const char * path, int flags, int mode);
+static int client_vfs_close(int fd);
+static ssize_t client_vfs_read(int fd, void * dst, size_t size);
+
+static const esp_vfs_t client_vfs = {
+    .flags = ESP_VFS_FLAG_DEFAULT,
+    .write = &client_vfs_write,
+    .open = &client_vfs_open,
+    .close = &client_vfs_close,
+    .read = &client_vfs_read,
+};
+
+static int client_vfs_open(const char *path, int flags, int mode) {
+    // ESP_LOGI(TAG, "client_vfs_open");
+    return 0;
+}
+
+static int client_vfs_close(int fd) {
+    return 0;
+}
+
+static ssize_t client_vfs_write(int fd, const void *data, size_t size) {
+    // ESP_LOGI(TAG, "vfs write %d socket %d", size, client_socket);
+    return send(client_socket, data, size, 0);
+}
+
+static ssize_t client_vfs_read(int fd, void *dst, size_t size) {
+    int len = recv(client_socket, dst, size, 0);
+    // ESP_LOGI(TAG, "vfs read %d socket %d", len, client_socket);
+    return len;
+}
 
 void tcp_server_task(void *pvParameters)
 {
+    // Create socket IO stream and store into emci_env instance
+    ESP_ERROR_CHECK(esp_vfs_register("/tcp", &client_vfs, NULL));
+    FILE *stream = fopen("/tcp", "r+");
+    setvbuf(stream, NULL, _IONBF, 0);
+    emci_env.extra = stream;
+
     char addr_str[128];
     int addr_family = (int)pvParameters;
     int ip_protocol = 0;
@@ -112,10 +154,10 @@ void tcp_server_task(void *pvParameters)
 #endif
         ESP_LOGI(TAG, "Socket accepted ip address: %s", addr_str);
 
-        emci_socket = sock;
+        client_socket = sock;
         ESP_LOGI(TAG, "emci_main_loop started");
         emci_main_loop(&emci_env);
-        emci_socket = -1;
+        client_socket = -1;
         ESP_LOGI(TAG, "emci_main_loop finished");
 
         shutdown(sock, 0);

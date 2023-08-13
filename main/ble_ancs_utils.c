@@ -9,8 +9,9 @@
 #include <inttypes.h>
 #include "esp_log.h"
 #include "ble_ancs_utils.h"
+#include "ancs.h"
 
-#define BLE_ANCS_TAG  "ANCS"
+#define TAG  "ANCS"
 
 /*
 | EventID(1 Byte) | EventFlags(1 Byte) | CategoryID(1 Byte) | CategoryCount(1 Byte) | NotificationUID(4 Bytes) |
@@ -114,12 +115,18 @@ void esp_receive_apple_notification_source(uint8_t *message, uint16_t message_le
     char    *Cidstr    = CategoryID_to_String(CategoryID);
     uint8_t CategoryCount = message[3];
     uint32_t NotificationUID = (message[4]) | (message[5]<< 8) | (message[6]<< 16) | (message[7] << 24);
-    ESP_LOGI(BLE_ANCS_TAG, "EventID:%s EventFlags:0x%x CategoryID:%s CategoryCount:%d NotificationUID:%" PRIu32, EventIDS, EventFlags, Cidstr, CategoryCount, NotificationUID);
+    ESP_LOGI(TAG, "EventID:%s EventFlags:0x%x CategoryID:%s CategoryCount:%d NotificationUID:%" PRIu32, EventIDS, EventFlags, Cidstr, CategoryCount, NotificationUID);
 }
 
 void esp_receive_apple_data_source(uint8_t *message, uint16_t message_len)
 {
-    ESP_LOGV(BLE_ANCS_TAG, "esp_receive_apple_data_source");
+    ESP_LOGV(TAG, "esp_receive_apple_data_source");
+
+    size_t sent = xMessageBufferSend(ancs_message_buffer, "TestAppleData", 13, pdMS_TO_TICKS(10));
+    if (sent != 13) {
+        ESP_LOGE(TAG, "xMessageBufferSend failed: sent %u instead of %u", sent, 13);
+    }
+
     //esp_log_buffer_hex("data source", message, message_len);
     if (!message || message_len == 0) {
         return;
@@ -131,13 +138,13 @@ void esp_receive_apple_data_source(uint8_t *message, uint16_t message_len)
             uint32_t NotificationUID = (message[1]) | (message[2]<< 8) | (message[3]<< 16) | (message[4] << 24);
             uint32_t remian_attr_len = message_len - 5;
             uint8_t *attrs = &message[5];
-            ESP_LOGI(BLE_ANCS_TAG, "Notification Attributes response Command_id %d NotificationUID %" PRIu32, Command_id, NotificationUID);
+            ESP_LOGI(TAG, "Notification Attributes response Command_id %d NotificationUID %" PRIu32, Command_id, NotificationUID);
             uint8_t AttributeID_prev = 0xFF;
             while(remian_attr_len > 0) {
                 uint8_t AttributeID = attrs[0];
                 uint16_t len = attrs[1] | (attrs[2] << 8);
                 if(len > (remian_attr_len -3)) {
-                    ESP_LOGE(BLE_ANCS_TAG, "data error");
+                    ESP_LOGE(TAG, "data error");
                     break;
                 }
                 switch (AttributeID)
@@ -180,13 +187,13 @@ void esp_receive_apple_data_source(uint8_t *message, uint16_t message_len)
             break;
         }
         case CommandIDGetAppAttributes:
-            ESP_LOGI(BLE_ANCS_TAG, "APP Attributes response");
+            ESP_LOGI(TAG, "APP Attributes response");
             break;
         case CommandIDPerformNotificationAction:
-            ESP_LOGI(BLE_ANCS_TAG, "Perform Notification Action");
+            ESP_LOGI(TAG, "Perform Notification Action");
             break;
         default:
-            ESP_LOGI(BLE_ANCS_TAG, "unknown Command ID");
+            ESP_LOGI(TAG, "unknown Command ID");
             break;
     }
 }

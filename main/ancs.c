@@ -36,6 +36,8 @@
 #define SCAN_RSP_CONFIG_FLAG                      (1 << 1)
 #define MESSAGE_BUFFER_STORAGE_SIZE               8192
 
+#define MAX_NOTIF_ATTR_SIZE                       511
+
 MessageBufferHandle_t ancs_message_buffer;
 
 static uint8_t adv_config_done = 0;
@@ -147,12 +149,19 @@ struct gattc_profile_inst {
     esp_bd_addr_t remote_bda;
     uint16_t MTU_size;
 
-    char device_name[64];
-    uint16_t appearance;
-
     ble_ancs_c_t ble_ancs_inst;
 
-    uint8_t attr_buffer[512];
+    union {
+        struct { uint8_t id; char text[MAX_NOTIF_ATTR_SIZE]; };
+        uint8_t data[MAX_NOTIF_ATTR_SIZE + 1];
+    } attr_buffer;
+
+    union {
+        struct { uint8_t id; char text[63]; };
+        uint8_t data[64]; // Must be <= MAX_NOTIF_ATTR_SIZE
+    } device_name;
+
+    uint16_t appearance;
 };
 
 static struct gattc_profile_inst gl_profile_tab[PROFILE_NUM];
@@ -479,9 +488,9 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             uint16_t len = (param->read.value_len > sizeof(gl_profile_tab[idx].device_name)-1) ?
                 sizeof(gl_profile_tab[idx].device_name)-1 :
                 param->read.value_len;
-            memcpy(gl_profile_tab[idx].device_name, param->read.value, len);
-            gl_profile_tab[idx].device_name[len] = '\0';
-            ESP_LOGI(TAG, "Device name: '%s'", gl_profile_tab[idx].device_name);
+            memcpy(gl_profile_tab[idx].device_name.text, param->read.value, len);
+            gl_profile_tab[idx].device_name.text[len] = '\0';
+            ESP_LOGI(TAG, "Device name: '%s'", gl_profile_tab[idx].device_name.text);
         } else if (param->read.handle == gl_profile_tab[idx].gap.appearance_elem.char_handle) {
             // Store device appearance
             gl_profile_tab[idx].appearance = ((uint16_t)param->read.value[1] << 8) + param->read.value[0];
@@ -744,6 +753,18 @@ static void app_attr_print(ble_ancs_c_attr_t * p_attr)
     }
 }
 
+static void send_to_stream(const uint8_t *data, size_t len) {
+    size_t sent = xMessageBufferSend(ancs_message_buffer, data, len, 0);
+
+    if (sent != len) {
+        // TODO: Read and discard oldest element, then retry
+        ESP_LOGE(TAG, "%s: Not enough free space", __func__);
+        return;
+    }
+
+    ESP_LOGI(TAG, "Sent %u bytes", sent);
+}
+
 /**@brief Function for handling the Apple Notification Service client.
  *
  * @details This function is called for all events in the Apple Notification client that
@@ -766,6 +787,9 @@ static void ancs_c_evt_handler(ble_ancs_c_evt_t * p_evt, void *ctx)
 
             if (p_evt->notif.evt_id == BLE_ANCS_EVENT_ID_NOTIFICATION_ADDED || p_evt->notif.evt_id == BLE_ANCS_EVENT_ID_NOTIFICATION_MODIFIED) {
                 gl_profile_tab[idx].ble_ancs_inst.parse_info.parse_state = BLE_ANCS_COMMAND_ID;
+
+                // TODO: wait for next request if prev is pending
+
                 len = ble_ancs_build_notif_attrs_request (&gl_profile_tab[idx].ble_ancs_inst, p_evt->notif.notif_uid, attrs_request_buffer, sizeof(attrs_request_buffer));
                 if (len == 0) {
                     ESP_LOGE(TAG, "ble_ancs_build_notif_attrs_request: out of memory");
@@ -789,6 +813,21 @@ static void ancs_c_evt_handler(ble_ancs_c_evt_t * p_evt, void *ctx)
 
         case BLE_ANCS_C_EVT_NOTIF_ATTRIBUTE:
             notif_attr_print(&p_evt->attr);
+
+            if (p_evt->attr.attr_len != 0) {
+                // Add attribute ID & attribute text to stream buffer
+                gl_profile_tab[idx].attr_buffer.id = (uint8_t)p_evt->attr.attr_id;
+                send_to_stream(gl_profile_tab[idx].attr_buffer.data, 1 + strlen(gl_profile_tab[idx].attr_buffer.text));
+            }
+
+            // Is it the last attribute?
+            if (ble_ancs_all_req_attrs_parsed(&gl_profile_tab[idx].ble_ancs_inst)) {
+                gl_profile_tab[idx].device_name.id = ANCS_ATTR_TAG_DEVICE_NAME;
+                send_to_stream(gl_profile_tab[idx].device_name.data, 1 + strlen(gl_profile_tab[idx].device_name.text));
+                uint8_t term = ANCS_ATTR_TAG_TERMINATOR;
+                send_to_stream(&term, 1);
+            }
+
             break;
         default:
             // No implementation needed.
@@ -807,16 +846,23 @@ static esp_err_t ancs_profile_init(int idx) {
     gl_profile_tab[idx].ble_ancs_inst.evt_handler = ancs_c_evt_handler;
     gl_profile_tab[idx].ble_ancs_inst.ctx = (void *)idx;
 
-    for (uint32_t id = 0; id < BLE_ANCS_NB_OF_NOTIF_ATTR; id ++) {
-        ret = ble_ancs_add_notif_attr(&gl_profile_tab[idx].ble_ancs_inst, id, gl_profile_tab[idx].attr_buffer, sizeof(gl_profile_tab[idx].attr_buffer));
+    const ble_ancs_c_notif_attr_id_val_t attrs[] = {
+        BLE_ANCS_NOTIF_ATTR_ID_APP_IDENTIFIER,
+        BLE_ANCS_NOTIF_ATTR_ID_TITLE,
+        BLE_ANCS_NOTIF_ATTR_ID_MESSAGE,
+        BLE_ANCS_NOTIF_ATTR_ID_DATE
+    };
+
+    for (uint32_t id = 0; id < sizeof(attrs) / sizeof(attrs[0]); id ++) {
+        ret = ble_ancs_add_notif_attr(&gl_profile_tab[idx].ble_ancs_inst, attrs[id], (uint8_t *)gl_profile_tab[idx].attr_buffer.text, sizeof(gl_profile_tab[idx].attr_buffer.text));
         if (ret) {
-            ESP_LOGE(TAG, "%s: ble_ancs_add_notif_attr failed, error code = %x", __func__, ret);
+            ESP_LOGE(TAG, "%s: ble_ancs_add_notif_attr(%u) failed, error code = %x", __func__, attrs[id], ret);
             return ret;
         }
     }
     // ret = ble_ancs_add_app_attr(&gl_profile_tab[idx].ble_ancs_inst, BLE_ANCS_APP_ATTR_ID_DISPLAY_NAME, gl_profile_tab[idx].attr_buffer, sizeof(gl_profile_tab[idx].attr_buffer));
 
-    ret = esp_ble_gattc_app_register(PROFILE_A_APP_ID);
+    ret = esp_ble_gattc_app_register(idx);
     if (ret) {
         ESP_LOGE(TAG, "%s: esp_ble_gattc_app_register failed, error code = %x", __func__, ret);
         return ret;
@@ -937,7 +983,7 @@ void ancs_dump_device_list(FILE *stream, const char *endl) {
             fprintf(stream, "[%i] %04x %s @ %02x:%02x:%02x:%02x:%02x:%02x%s",
                 idx+1,
                 gl_profile_tab[idx].appearance,
-                gl_profile_tab[idx].device_name,
+                gl_profile_tab[idx].device_name.text,
                 gl_profile_tab[idx].remote_bda[0],
                 gl_profile_tab[idx].remote_bda[1],
                 gl_profile_tab[idx].remote_bda[2],
@@ -950,5 +996,47 @@ void ancs_dump_device_list(FILE *stream, const char *endl) {
     }
     if (empty) {
         fprintf(stream, "<No devices>%s", endl);
+    }
+}
+
+void ancs_dump_notification_list(FILE *stream, const char *endl) {
+    union {
+        struct { uint8_t id; char text[MAX_NOTIF_ATTR_SIZE]; };
+        uint8_t data[MAX_NOTIF_ATTR_SIZE + 1];
+    } attr_buffer;
+
+    uint32_t ctr = 0;
+
+    while (true) {
+        size_t len = xMessageBufferReceive(ancs_message_buffer, attr_buffer.data, sizeof(attr_buffer), 0);
+        if (len == 0) {
+            // No more items
+            if (ctr == 0) {
+                fprintf(stream, "<No messages>%s", endl);
+            }
+            return;
+        }
+
+        if ((len > 1) && (len < MAX_NOTIF_ATTR_SIZE)) {
+            attr_buffer.text[len] = '\0';
+        } else if (len == MAX_NOTIF_ATTR_SIZE) {
+            attr_buffer.text[MAX_NOTIF_ATTR_SIZE - 1] = '\0'; // TODO: check max size
+        }
+
+        switch (attr_buffer.id) {
+            case ANCS_ATTR_TAG_DEVICE_NAME:
+                fprintf(stream, "Dev %s%s", attr_buffer.text, endl);
+                break;
+            case ANCS_ATTR_TAG_APP_IDENTIFIER:
+                fprintf(stream, "App %s%s", attr_buffer.text, endl);
+                break;
+            case ANCS_ATTR_TAG_MESSAGE:
+                fprintf(stream, "Msg %s%s", attr_buffer.text, endl);
+                break;
+            case ANCS_ATTR_TAG_TERMINATOR:
+                fprintf(stream, "--- End of message %"PRIu32" ---%s", ctr + 1, endl);
+                ctr ++;
+                break;
+        }
     }
 }

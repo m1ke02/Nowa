@@ -213,6 +213,8 @@ typedef struct
     ble_ancs_c_evt_t                 evt;                                             //!< Allocate memory for the event here. The event is filled with several iterations of the @ref ancs_parse_get_attrs_response function when requesting iOS notification attributes.
 } ble_ancs_c_t;
 
+bool ble_ancs_all_req_attrs_parsed(ble_ancs_c_t * p_ancs);
+
 /**@brief Function for parsing notification or app attribute response data.
  *
  * @details The data that comes from the Notification Provider can be much longer than what

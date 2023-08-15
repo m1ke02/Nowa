@@ -67,7 +67,7 @@ static uint32_t uint32_decode(const uint8_t * p_encoded_data)
 }
 
 
-static bool all_req_attrs_parsed(ble_ancs_c_t * p_ancs)
+bool ble_ancs_all_req_attrs_parsed(ble_ancs_c_t * p_ancs)
 {
     if (p_ancs->parse_info.expected_number_of_attrs == 0)
     {
@@ -182,7 +182,7 @@ static ble_ancs_c_parse_state_t attr_id_parse(ble_ancs_c_t  * p_ancs,
     }
     p_ancs->evt.attr.p_attr_data = p_ancs->parse_info.p_attr_list[p_ancs->evt.attr.attr_id].p_attr_data;
 
-    if (all_req_attrs_parsed(p_ancs))
+    if (ble_ancs_all_req_attrs_parsed(p_ancs))
     {
         ESP_LOGD(TAG, "All requested attributes received. ");
         return BLE_ANCS_ATTR_DONE;
@@ -256,7 +256,7 @@ static ble_ancs_c_parse_state_t attr_len2_parse(ble_ancs_c_t * p_ancs, const uin
         {
             p_ancs->evt_handler(&p_ancs->evt, p_ancs->ctx);
         }
-        if (all_req_attrs_parsed(p_ancs))
+        if (ble_ancs_all_req_attrs_parsed(p_ancs))
         {
             return BLE_ANCS_ATTR_DONE;
         }
@@ -313,7 +313,7 @@ static ble_ancs_c_parse_state_t attr_data_parse(ble_ancs_c_t  * p_ancs,
         {
             p_ancs->evt_handler(&p_ancs->evt, p_ancs->ctx);
         }
-        if (all_req_attrs_parsed(p_ancs))
+        if (ble_ancs_all_req_attrs_parsed(p_ancs))
         {
             return BLE_ANCS_ATTR_DONE;
         }
@@ -343,7 +343,7 @@ static ble_ancs_c_parse_state_t attr_skip(ble_ancs_c_t * p_ancs, const uint8_t *
         {
             p_ancs->evt_handler(&p_ancs->evt, p_ancs->ctx);
         }
-        if (all_req_attrs_parsed(p_ancs))
+        if (ble_ancs_all_req_attrs_parsed(p_ancs))
         {
             return BLE_ANCS_ATTR_DONE;
         }

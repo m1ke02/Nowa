@@ -17,6 +17,10 @@ const emci_command_t cmd_array[] =
     NULL,
     "Print connected device list", NULL},
 
+    {"nl", notification_list_handler, "", 0,
+    NULL,
+    "Print unread notification list", NULL},
+
     {"vars", emci_vars_handler, "", 0,
     NULL,
     "Print list of all variables", NULL},
@@ -50,6 +54,12 @@ emci_status_t about_handler(uint8_t argc, emci_arg_t *argv, emci_env_t *env)
 emci_status_t device_list_handler(uint8_t argc, emci_arg_t *argv, emci_env_t *env)
 {
     ancs_dump_device_list ((FILE *)env->extra, EMCI_ENDL);
+    return EMCI_STATUS_OK;
+}
+
+emci_status_t notification_list_handler(uint8_t argc, emci_arg_t *argv, emci_env_t *env)
+{
+    ancs_dump_notification_list ((FILE *)env->extra, EMCI_ENDL);
     return EMCI_STATUS_OK;
 }
 

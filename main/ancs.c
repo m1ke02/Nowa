@@ -1,3 +1,4 @@
+#include "ancs.h"
 #include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -33,14 +34,22 @@
 #define PROFILE_NUM                               4
 #define ADV_CONFIG_FLAG                           (1 << 0)
 #define SCAN_RSP_CONFIG_FLAG                      (1 << 1)
+#define MESSAGE_BUFFER_STORAGE_SIZE               8192
+
+MessageBufferHandle_t ancs_message_buffer;
+
 static uint8_t adv_config_done = 0;
 static void periodic_timer_callback(void* arg);
 
-esp_timer_create_args_t periodic_timer_args = {
+static esp_timer_create_args_t periodic_timer_args = {
     .callback = &periodic_timer_callback,
     /* name is optional, but may help identify the timer when debugging */
     .name = "periodic"
 };
+
+static StaticMessageBuffer_t message_buffer_struct;
+
+static uint8_t message_buffer_storage[MESSAGE_BUFFER_STORAGE_SIZE];
 
 struct data_source_buffer {
     uint8_t buffer[1024];
@@ -155,7 +164,11 @@ struct gattc_profile_inst {
     char device_name[64];
     uint16_t appearance;
 
-    struct data_source_buffer data_buffer;
+    ble_ancs_c_t ble_ancs_inst;
+
+    uint8_t attr_buffer[512];
+
+    struct data_source_buffer data_buffer; /*TODO: remove*/
 };
 
 static struct gattc_profile_inst gl_profile_tab[PROFILE_NUM] = {
@@ -633,31 +646,36 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         ESP_LOGV(TAG, "Rx notification: %u bytes", param->notify.value_len);
         esp_log_buffer_hex(TAG, param->notify.value, param->notify.value_len);
         if (param->notify.handle == gl_profile_tab[idx].anc.notification_source_char_elem.char_handle) {
-            esp_receive_apple_notification_source(param->notify.value, param->notify.value_len);
-            uint8_t *notificationUID = &param->notify.value[4];
-            if (param->notify.value[0] == EventIDNotificationAdded && param->notify.value[2] == CategoryIDIncomingCall) {
-                ESP_LOGI(TAG, "IncomingCall, reject");
-                //Call reject
-                // esp_perform_notification_action(idx, notificationUID, ActionIDNegative);
-            } else if (param->notify.value[0] == EventIDNotificationAdded) {
-                //get more information
-                ESP_LOGI(TAG, "Get detailed information");
-                esp_get_notification_attributes(idx, notificationUID, sizeof(p_attr)/sizeof(esp_noti_attr_list_t), p_attr);
+            // esp_receive_apple_notification_source(param->notify.value, param->notify.value_len);
+            // uint8_t *notificationUID = &param->notify.value[4];
+            // if (param->notify.value[0] == EventIDNotificationAdded && param->notify.value[2] == CategoryIDIncomingCall) {
+            //     ESP_LOGI(TAG, "IncomingCall, reject");
+            //     //Call reject
+            //     // esp_perform_notification_action(idx, notificationUID, ActionIDNegative);
+            // } else if (param->notify.value[0] == EventIDNotificationAdded) {
+            //     //get more information
+            //     ESP_LOGI(TAG, "Get detailed information");
+            //     esp_get_notification_attributes(idx, notificationUID, sizeof(p_attr)/sizeof(esp_noti_attr_list_t), p_attr);
+            // }
+            esp_err_t ret_status = ble_ancs_parse_notif(&gl_profile_tab[idx].ble_ancs_inst, param->notify.value, param->notify.value_len);
+            if (ret_status != ESP_GATT_OK) {
+                ESP_LOGE(TAG, "ble_ancs_parse_notif failed, error status = %x", ret_status);
             }
         } else if (param->notify.handle == gl_profile_tab[idx].anc.data_source_char_elem.char_handle) {
-            /* TODO: Remove data_buffer accum, remove timer and parse data stream by esp_receive_apple_data_source() */
-            memcpy(&gl_profile_tab[idx].data_buffer.buffer[gl_profile_tab[idx].data_buffer.len], param->notify.value, param->notify.value_len);
-            gl_profile_tab[idx].data_buffer.len += param->notify.value_len;
-            if (param->notify.value_len == (gl_profile_tab[idx].MTU_size - 3)) {
-                // copy and wait next packet, start timer 500ms
-                ESP_LOGV(TAG, "Starting timer");
-                esp_timer_start_periodic(gl_profile_tab[idx].periodic_timer, 500000);
-            } else {
-                esp_timer_stop(gl_profile_tab[idx].periodic_timer);
-                esp_receive_apple_data_source(gl_profile_tab[idx].data_buffer.buffer, gl_profile_tab[idx].data_buffer.len);
-                memset(gl_profile_tab[idx].data_buffer.buffer, 0, gl_profile_tab[idx].data_buffer.len);
-                gl_profile_tab[idx].data_buffer.len = 0;
-            }
+            // /* TODO: Remove data_buffer accum, remove timer and parse data stream by esp_receive_apple_data_source() */
+            // memcpy(&gl_profile_tab[idx].data_buffer.buffer[gl_profile_tab[idx].data_buffer.len], param->notify.value, param->notify.value_len);
+            // gl_profile_tab[idx].data_buffer.len += param->notify.value_len;
+            // if (param->notify.value_len == (gl_profile_tab[idx].MTU_size - 3)) {
+            //     // copy and wait next packet, start timer 500ms
+            //     ESP_LOGV(TAG, "Starting timer");
+            //     esp_timer_start_periodic(gl_profile_tab[idx].periodic_timer, 500000);
+            // } else {
+            //     esp_timer_stop(gl_profile_tab[idx].periodic_timer);
+            //     esp_receive_apple_data_source(gl_profile_tab[idx].data_buffer.buffer, gl_profile_tab[idx].data_buffer.len);
+            //     memset(gl_profile_tab[idx].data_buffer.buffer, 0, gl_profile_tab[idx].data_buffer.len);
+            //     gl_profile_tab[idx].data_buffer.len = 0;
+            // }
+            ble_ancs_parse_get_attrs_response(&gl_profile_tab[idx].ble_ancs_inst, param->notify.value, param->notify.value_len);
         } else {
             ESP_LOGI(TAG, "unknown handle, receive notify value:");
         }
@@ -672,11 +690,6 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
     case ESP_GATTC_SRVC_CHG_EVT: {
         ESP_LOGI(TAG, "ESP_GATTC_SRVC_CHG_EVT, bd_addr:");
         esp_log_buffer_hex(TAG, param->srvc_chg.remote_bda, 6);
-        /*
-        m_ancs_discovered  = false;
-        m_gatts_discovered = false;
-        ret = ble_db_discovery_start(&m_db_disc, p_evt->conn_handle);
-        */
         break;
     }
     case ESP_GATTC_WRITE_CHAR_EVT:
@@ -763,20 +776,169 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
 
     /* Every profile has the same callback so call it directly */
     gattc_profile_event_handler(event, gattc_if, param);
+}
 
-    /* If the gattc_if equal to profile A, call profile A cb handler,
-     * so here call each profile's callback */
-    // do {
-    //     int idx;
-    //     for (idx = 0; idx < PROFILE_NUM; idx++) {
-    //         if (gattc_if == ESP_GATT_IF_NONE || /* ESP_GATT_IF_NONE, not specify a certain gatt_if, need to call every profile cb function */
-    //                 gattc_if == gl_profile_tab[idx].gattc_if) {
-    //             if (gl_profile_tab[idx].gattc_cb) {
-    //                 gl_profile_tab[idx].gattc_cb(event, gattc_if, param);
-    //             }
-    //         }
-    //     }
-    // } while (0);
+/**@brief String literals for the iOS notification categories. used then printing to UART. */
+static char const * lit_catid[BLE_ANCS_NB_OF_CATEGORY_ID] =
+{
+    "Other",
+    "Incoming Call",
+    "Missed Call",
+    "Voice Mail",
+    "Social",
+    "Schedule",
+    "Email",
+    "News",
+    "Health And Fitness",
+    "Business And Finance",
+    "Location",
+    "Entertainment"
+};
+
+/**@brief String literals for the iOS notification event types. Used then printing to UART. */
+static char const * lit_eventid[BLE_ANCS_NB_OF_EVT_ID] =
+{
+    "Added",
+    "Modified",
+    "Removed"
+};
+
+/**@brief String literals for the iOS notification attribute types. Used when printing to UART. */
+static char const * lit_attrid[BLE_ANCS_NB_OF_NOTIF_ATTR] =
+{
+    "App Identifier",
+    "Title",
+    "Subtitle",
+    "Message",
+    "Message Size",
+    "Date",
+    "Positive Action Label",
+    "Negative Action Label"
+};
+
+/**@brief String literals for the iOS notification attribute types. Used When printing to UART. */
+static char const * lit_appid[BLE_ANCS_NB_OF_APP_ATTR] =
+{
+    "Display Name"
+};
+
+/**@brief Function for printing an iOS notification.
+ *
+ * @param[in] p_notif  Pointer to the iOS notification.
+ */
+static void notif_print(ble_ancs_c_evt_notif_t * p_notif)
+{
+    ESP_LOGI(TAG, "Notification");
+    ESP_LOGI(TAG, "Event:       %s", lit_eventid[p_notif->evt_id]);
+    ESP_LOGI(TAG, "Category ID: %s", lit_catid[p_notif->category_id]);
+    ESP_LOGI(TAG, "Category Cnt:%"PRIu8, p_notif->category_count);
+    ESP_LOGI(TAG, "UID:         %"PRIu32, p_notif->notif_uid);
+
+    ESP_LOGI(TAG, "Flags:");
+    if (p_notif->evt_flags.silent == 1)
+    {
+        ESP_LOGI(TAG, " Silent");
+    }
+    if (p_notif->evt_flags.important == 1)
+    {
+        ESP_LOGI(TAG, " Important");
+    }
+    if (p_notif->evt_flags.pre_existing == 1)
+    {
+        ESP_LOGI(TAG, " Pre-existing");
+    }
+    if (p_notif->evt_flags.positive_action == 1)
+    {
+        ESP_LOGI(TAG, " Positive Action");
+    }
+    if (p_notif->evt_flags.negative_action == 1)
+    {
+        ESP_LOGI(TAG, " Negative Action");
+    }
+}
+
+/**@brief Function for printing iOS notification attribute data.
+ *
+ * @param[in] p_attr Pointer to an iOS notification attribute.
+ */
+static void notif_attr_print(ble_ancs_c_attr_t * p_attr)
+{
+    if (p_attr->attr_len != 0)
+    {
+        ESP_LOGI(TAG, "NA %s: %s", lit_attrid[p_attr->attr_id], p_attr->p_attr_data);
+    }
+    else if (p_attr->attr_len == 0)
+    {
+        ESP_LOGI(TAG, "NA %s: <No Data>", lit_attrid[p_attr->attr_id]);
+    }
+}
+
+/**@brief Function for printing iOS notification attribute data.
+ *
+ * @param[in] p_attr Pointer to an iOS App attribute.
+ */
+static void app_attr_print(ble_ancs_c_attr_t * p_attr)
+{
+    if (p_attr->attr_len != 0)
+    {
+        ESP_LOGI(TAG, "AA %s: %s", lit_appid[p_attr->attr_id], p_attr->p_attr_data);
+    }
+    else if (p_attr->attr_len == 0)
+    {
+        ESP_LOGI(TAG, "AA %s: <No Data>", lit_appid[p_attr->attr_id]);
+    }
+}
+
+/**@brief Function for handling the Apple Notification Service client.
+ *
+ * @details This function is called for all events in the Apple Notification client that
+ *          are passed to the application.
+ *
+ * @param[in] p_evt  Event received from the Apple Notification Service client.
+ */
+static void ancs_c_evt_handler(ble_ancs_c_evt_t * p_evt, void *ctx)
+{
+    static uint8_t attrs_request_buffer[BLE_ANCS_ATTR_DATA_MAX];
+    uint32_t len;
+    uint32_t idx = (uint32_t)ctx;
+
+    ESP_LOGV(TAG, "ancs_c_evt_handler: %u uid=%"PRIu32, p_evt->evt_type, p_evt->notif.notif_uid);
+
+    switch (p_evt->evt_type)
+    {
+        case BLE_ANCS_C_EVT_NOTIF:
+            notif_print(&p_evt->notif);
+
+            if (p_evt->notif.evt_id == BLE_ANCS_EVENT_ID_NOTIFICATION_ADDED || p_evt->notif.evt_id == BLE_ANCS_EVENT_ID_NOTIFICATION_MODIFIED) {
+                gl_profile_tab[idx].ble_ancs_inst.parse_info.parse_state = BLE_ANCS_COMMAND_ID;
+                len = ble_ancs_build_notif_attrs_request (&gl_profile_tab[idx].ble_ancs_inst, p_evt->notif.notif_uid, attrs_request_buffer, sizeof(attrs_request_buffer));
+                if (len == 0) {
+                    ESP_LOGE(TAG, "ble_ancs_build_notif_attrs_request: out of memory");
+                    break;
+                }
+                esp_log_buffer_hex(TAG, attrs_request_buffer, len);
+                esp_err_t ret_status = esp_ble_gattc_write_char(gl_profile_tab[idx].gattc_if,
+                                                                gl_profile_tab[idx].conn_id,
+                                                                gl_profile_tab[idx].anc.control_point_char_elem.char_handle,
+                                                                len,
+                                                                attrs_request_buffer,
+                                                                ESP_GATT_WRITE_TYPE_RSP,
+                                                                ESP_GATT_AUTH_REQ_NONE);
+                if (ret_status != ESP_GATT_OK) {
+                    ESP_LOGE(TAG, "esp_ble_gattc_write_char failed");
+                    break;
+                }
+                // esp_get_notification_attributes(idx, &p_evt->notif.notif_uid, sizeof(p_attr)/sizeof(esp_noti_attr_list_t), p_attr);
+            }
+            break;
+
+        case BLE_ANCS_C_EVT_NOTIF_ATTRIBUTE:
+            notif_attr_print(&p_evt->attr);
+            break;
+        default:
+            // No implementation needed.
+            break;
+    }
 }
 
 void init_timer(int idx)
@@ -791,6 +953,50 @@ esp_err_t ancs_init(void)
 
     esp_log_level_set(TAG, ESP_LOG_VERBOSE);
     esp_log_level_set("nvs", ESP_LOG_VERBOSE);
+
+    ancs_message_buffer = xMessageBufferCreateStatic(sizeof(message_buffer_storage), message_buffer_storage, &message_buffer_struct);
+    if (ancs_message_buffer == NULL) {
+        ESP_LOGE(TAG, "%s xMessageBufferCreateStatic failed", __func__);
+        return ESP_FAIL;
+    }
+
+    // Init the ANCS client modules
+    memset(&gl_profile_tab[PROFILE_A_APP_ID].ble_ancs_inst, 0, sizeof(gl_profile_tab[PROFILE_A_APP_ID].ble_ancs_inst));
+    gl_profile_tab[PROFILE_A_APP_ID].ble_ancs_inst.evt_handler = ancs_c_evt_handler;
+    gl_profile_tab[PROFILE_A_APP_ID].ble_ancs_inst.ctx = (void *)PROFILE_A_APP_ID;
+    for (uint32_t id = 0; id < BLE_ANCS_NB_OF_NOTIF_ATTR; id ++) {
+        gl_profile_tab[PROFILE_A_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].get = true;
+        gl_profile_tab[PROFILE_A_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].attr_len = sizeof(gl_profile_tab[PROFILE_A_APP_ID].attr_buffer);
+        gl_profile_tab[PROFILE_A_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].p_attr_data = gl_profile_tab[PROFILE_A_APP_ID].attr_buffer;
+    }
+    // ret = ble_ancs_add_app_attr(&ble_ancs_inst, BLE_ANCS_APP_ATTR_ID_DISPLAY_NAME, m_attr_disp_name, sizeof(m_attr_disp_name));
+
+    memset(&gl_profile_tab[PROFILE_B_APP_ID].ble_ancs_inst, 0, sizeof(gl_profile_tab[PROFILE_B_APP_ID].ble_ancs_inst));
+    gl_profile_tab[PROFILE_B_APP_ID].ble_ancs_inst.evt_handler = ancs_c_evt_handler;
+    gl_profile_tab[PROFILE_B_APP_ID].ble_ancs_inst.ctx = (void *)PROFILE_B_APP_ID;
+    for (uint32_t id = 0; id < BLE_ANCS_NB_OF_NOTIF_ATTR; id ++) {
+        gl_profile_tab[PROFILE_B_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].get = true;
+        gl_profile_tab[PROFILE_B_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].attr_len = sizeof(gl_profile_tab[PROFILE_B_APP_ID].attr_buffer);
+        gl_profile_tab[PROFILE_B_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].p_attr_data = gl_profile_tab[PROFILE_B_APP_ID].attr_buffer;
+    }
+
+    memset(&gl_profile_tab[PROFILE_C_APP_ID].ble_ancs_inst, 0, sizeof(gl_profile_tab[PROFILE_C_APP_ID].ble_ancs_inst));
+    gl_profile_tab[PROFILE_C_APP_ID].ble_ancs_inst.evt_handler = ancs_c_evt_handler;
+    gl_profile_tab[PROFILE_C_APP_ID].ble_ancs_inst.ctx = (void *)PROFILE_C_APP_ID;
+    for (uint32_t id = 0; id < BLE_ANCS_NB_OF_NOTIF_ATTR; id ++) {
+        gl_profile_tab[PROFILE_C_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].get = true;
+        gl_profile_tab[PROFILE_C_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].attr_len = sizeof(gl_profile_tab[PROFILE_C_APP_ID].attr_buffer);
+        gl_profile_tab[PROFILE_C_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].p_attr_data = gl_profile_tab[PROFILE_C_APP_ID].attr_buffer;
+    }
+
+    memset(&gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst, 0, sizeof(gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst));
+    gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst.evt_handler = ancs_c_evt_handler;
+    gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst.ctx = (void *)PROFILE_D_APP_ID;
+    for (uint32_t id = 0; id < BLE_ANCS_NB_OF_NOTIF_ATTR; id ++) {
+        gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].get = true;
+        gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].attr_len = sizeof(gl_profile_tab[PROFILE_D_APP_ID].attr_buffer);
+        gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].p_attr_data = gl_profile_tab[PROFILE_D_APP_ID].attr_buffer;
+    }
 
     // init timer
     init_timer(PROFILE_A_APP_ID);

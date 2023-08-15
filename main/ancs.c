@@ -1017,10 +1017,10 @@ void ancs_dump_notification_list(FILE *stream, const char *endl) {
             return;
         }
 
-        if ((len > 1) && (len < MAX_NOTIF_ATTR_SIZE)) {
-            attr_buffer.text[len] = '\0';
-        } else if (len == MAX_NOTIF_ATTR_SIZE) {
-            attr_buffer.text[MAX_NOTIF_ATTR_SIZE - 1] = '\0'; // TODO: check max size
+        if ((len > 1) && (len < sizeof(attr_buffer))) {
+            attr_buffer.data[len] = (uint8_t)'\0';
+        } else if (len == sizeof(attr_buffer)) {
+            attr_buffer.data[len - 1] = (uint8_t)'\0'; // Overwrite last char
         }
 
         switch (attr_buffer.id) {
@@ -1034,7 +1034,7 @@ void ancs_dump_notification_list(FILE *stream, const char *endl) {
                 fprintf(stream, "Msg %s%s", attr_buffer.text, endl);
                 break;
             case ANCS_ATTR_TAG_TERMINATOR:
-                fprintf(stream, "--- End of message %"PRIu32" ---%s", ctr + 1, endl);
+                fprintf(stream, "--- End of message %"PRIu32" ---%s%s", ctr + 1, endl, endl);
                 ctr ++;
                 break;
         }

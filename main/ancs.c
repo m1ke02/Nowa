@@ -155,24 +155,7 @@ struct gattc_profile_inst {
     uint8_t attr_buffer[512];
 };
 
-static struct gattc_profile_inst gl_profile_tab[PROFILE_NUM] = {
-    [PROFILE_A_APP_ID] = {
-        .gattc_cb = gattc_profile_event_handler,
-        .gattc_if = ESP_GATT_IF_NONE,       /* Not get the gatt_if, so initial is ESP_GATT_IF_NONE */
-    },
-    [PROFILE_B_APP_ID] = {
-        .gattc_cb = gattc_profile_event_handler,
-        .gattc_if = ESP_GATT_IF_NONE,       /* Not get the gatt_if, so initial is ESP_GATT_IF_NONE */
-    },
-    [PROFILE_C_APP_ID] = {
-        .gattc_cb = gattc_profile_event_handler,
-        .gattc_if = ESP_GATT_IF_NONE,       /* Not get the gatt_if, so initial is ESP_GATT_IF_NONE */
-    },
-    [PROFILE_D_APP_ID] = {
-        .gattc_cb = gattc_profile_event_handler,
-        .gattc_if = ESP_GATT_IF_NONE,       /* Not get the gatt_if, so initial is ESP_GATT_IF_NONE */
-    },
-};
+static struct gattc_profile_inst gl_profile_tab[PROFILE_NUM];
 
 typedef enum {
    Unknown_command   = (0xA0), //The commandID was not recognized by the NP.
@@ -813,6 +796,35 @@ static void ancs_c_evt_handler(ble_ancs_c_evt_t * p_evt, void *ctx)
     }
 }
 
+static esp_err_t ancs_profile_init(int idx) {
+    esp_err_t ret;
+
+    gl_profile_tab[idx].gattc_cb = gattc_profile_event_handler,
+    gl_profile_tab[idx].gattc_if = ESP_GATT_IF_NONE,       /* Not get the gatt_if, so initial is ESP_GATT_IF_NONE */
+
+    // Init the ANCS client module
+    memset(&gl_profile_tab[idx].ble_ancs_inst, 0, sizeof(gl_profile_tab[idx].ble_ancs_inst));
+    gl_profile_tab[idx].ble_ancs_inst.evt_handler = ancs_c_evt_handler;
+    gl_profile_tab[idx].ble_ancs_inst.ctx = (void *)idx;
+
+    for (uint32_t id = 0; id < BLE_ANCS_NB_OF_NOTIF_ATTR; id ++) {
+        ret = ble_ancs_add_notif_attr(&gl_profile_tab[idx].ble_ancs_inst, id, gl_profile_tab[idx].attr_buffer, sizeof(gl_profile_tab[idx].attr_buffer));
+        if (ret) {
+            ESP_LOGE(TAG, "%s: ble_ancs_add_notif_attr failed, error code = %x", __func__, ret);
+            return ret;
+        }
+    }
+    // ret = ble_ancs_add_app_attr(&gl_profile_tab[idx].ble_ancs_inst, BLE_ANCS_APP_ATTR_ID_DISPLAY_NAME, gl_profile_tab[idx].attr_buffer, sizeof(gl_profile_tab[idx].attr_buffer));
+
+    ret = esp_ble_gattc_app_register(PROFILE_A_APP_ID);
+    if (ret) {
+        ESP_LOGE(TAG, "%s: esp_ble_gattc_app_register failed, error code = %x", __func__, ret);
+        return ret;
+    }
+
+    return ESP_OK;
+}
+
 esp_err_t ancs_init(void)
 {
     esp_err_t ret;
@@ -826,110 +838,69 @@ esp_err_t ancs_init(void)
         return ESP_FAIL;
     }
 
-    // Init the ANCS client modules
-    memset(&gl_profile_tab[PROFILE_A_APP_ID].ble_ancs_inst, 0, sizeof(gl_profile_tab[PROFILE_A_APP_ID].ble_ancs_inst));
-    gl_profile_tab[PROFILE_A_APP_ID].ble_ancs_inst.evt_handler = ancs_c_evt_handler;
-    gl_profile_tab[PROFILE_A_APP_ID].ble_ancs_inst.ctx = (void *)PROFILE_A_APP_ID;
-    for (uint32_t id = 0; id < BLE_ANCS_NB_OF_NOTIF_ATTR; id ++) {
-        gl_profile_tab[PROFILE_A_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].get = true;
-        gl_profile_tab[PROFILE_A_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].attr_len = sizeof(gl_profile_tab[PROFILE_A_APP_ID].attr_buffer);
-        gl_profile_tab[PROFILE_A_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].p_attr_data = gl_profile_tab[PROFILE_A_APP_ID].attr_buffer;
-    }
-    // ret = ble_ancs_add_app_attr(&ble_ancs_inst, BLE_ANCS_APP_ATTR_ID_DISPLAY_NAME, m_attr_disp_name, sizeof(m_attr_disp_name));
-
-    memset(&gl_profile_tab[PROFILE_B_APP_ID].ble_ancs_inst, 0, sizeof(gl_profile_tab[PROFILE_B_APP_ID].ble_ancs_inst));
-    gl_profile_tab[PROFILE_B_APP_ID].ble_ancs_inst.evt_handler = ancs_c_evt_handler;
-    gl_profile_tab[PROFILE_B_APP_ID].ble_ancs_inst.ctx = (void *)PROFILE_B_APP_ID;
-    for (uint32_t id = 0; id < BLE_ANCS_NB_OF_NOTIF_ATTR; id ++) {
-        gl_profile_tab[PROFILE_B_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].get = true;
-        gl_profile_tab[PROFILE_B_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].attr_len = sizeof(gl_profile_tab[PROFILE_B_APP_ID].attr_buffer);
-        gl_profile_tab[PROFILE_B_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].p_attr_data = gl_profile_tab[PROFILE_B_APP_ID].attr_buffer;
-    }
-
-    memset(&gl_profile_tab[PROFILE_C_APP_ID].ble_ancs_inst, 0, sizeof(gl_profile_tab[PROFILE_C_APP_ID].ble_ancs_inst));
-    gl_profile_tab[PROFILE_C_APP_ID].ble_ancs_inst.evt_handler = ancs_c_evt_handler;
-    gl_profile_tab[PROFILE_C_APP_ID].ble_ancs_inst.ctx = (void *)PROFILE_C_APP_ID;
-    for (uint32_t id = 0; id < BLE_ANCS_NB_OF_NOTIF_ATTR; id ++) {
-        gl_profile_tab[PROFILE_C_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].get = true;
-        gl_profile_tab[PROFILE_C_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].attr_len = sizeof(gl_profile_tab[PROFILE_C_APP_ID].attr_buffer);
-        gl_profile_tab[PROFILE_C_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].p_attr_data = gl_profile_tab[PROFILE_C_APP_ID].attr_buffer;
-    }
-
-    memset(&gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst, 0, sizeof(gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst));
-    gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst.evt_handler = ancs_c_evt_handler;
-    gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst.ctx = (void *)PROFILE_D_APP_ID;
-    for (uint32_t id = 0; id < BLE_ANCS_NB_OF_NOTIF_ATTR; id ++) {
-        gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].get = true;
-        gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].attr_len = sizeof(gl_profile_tab[PROFILE_D_APP_ID].attr_buffer);
-        gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].p_attr_data = gl_profile_tab[PROFILE_D_APP_ID].attr_buffer;
-    }
-
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
 
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     ret = esp_bt_controller_init(&bt_cfg);
     if (ret) {
-        ESP_LOGE(TAG, "%s init controller failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "%s: init controller failed: %s", __func__, esp_err_to_name(ret));
         return ret;
     }
     ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
     if (ret) {
-        ESP_LOGE(TAG, "%s enable controller failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "%s: enable controller failed: %s", __func__, esp_err_to_name(ret));
         return ret;
     }
 
-    ESP_LOGI(TAG, "%s init bluetooth", __func__);
+    ESP_LOGI(TAG, "%s: init bluetooth", __func__);
     ret = esp_bluedroid_init();
     if (ret) {
-        ESP_LOGE(TAG, "%s init bluetooth failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "%s: init bluetooth failed: %s", __func__, esp_err_to_name(ret));
         return ret;
     }
     ret = esp_bluedroid_enable();
     if (ret) {
-        ESP_LOGE(TAG, "%s enable bluetooth failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "%s: enable bluetooth failed: %s", __func__, esp_err_to_name(ret));
         return ret;
     }
 
     //register the callback function to the gattc module
     ret = esp_ble_gattc_register_callback(esp_gattc_cb);
     if (ret) {
-        ESP_LOGE(TAG, "%s gattc register error, error code = %x\n", __func__, ret);
+        ESP_LOGE(TAG, "%s: gattc register error, error code = %x", __func__, ret);
         return ret;
     }
 
     ret = esp_ble_gap_register_callback(gap_event_handler);
     if (ret) {
-        ESP_LOGE(TAG, "gap register error, error code = %x", ret);
+        ESP_LOGE(TAG, "%s: gap register error, error code = %x", __func__, ret);
         return ret;
     }
 
-    ret = esp_ble_gattc_app_register(PROFILE_A_APP_ID);
+    ret = ancs_profile_init(PROFILE_A_APP_ID);
     if (ret) {
-        ESP_LOGE(TAG, "%s gattc app register error, error code = %x\n", __func__, ret);
+        ESP_LOGE(TAG, "%s: ancs_profile_init failed, error code = %x", __func__, ret);
         return ret;
     }
-
-    ret = esp_ble_gattc_app_register(PROFILE_B_APP_ID);
+    ret = ancs_profile_init(PROFILE_B_APP_ID);
     if (ret) {
-        ESP_LOGE(TAG, "%s gattc app register error, error code = %x\n", __func__, ret);
+        ESP_LOGE(TAG, "%s: ancs_profile_init failed, error code = %x", __func__, ret);
         return ret;
     }
-
-    ret = esp_ble_gattc_app_register(PROFILE_C_APP_ID);
+    ret = ancs_profile_init(PROFILE_C_APP_ID);
     if (ret) {
-        ESP_LOGE(TAG, "%s gattc app register error, error code = %x\n", __func__, ret);
+        ESP_LOGE(TAG, "%s: ancs_profile_init failed, error code = %x", __func__, ret);
         return ret;
     }
-
-    ret = esp_ble_gattc_app_register(PROFILE_D_APP_ID);
+    ret = ancs_profile_init(PROFILE_D_APP_ID);
     if (ret) {
-        ESP_LOGE(TAG, "%s gattc app register error, error code = %x\n", __func__, ret);
+        ESP_LOGE(TAG, "%s: ancs_profile_init failed, error code = %x", __func__, ret);
         return ret;
     }
 
     ret = esp_ble_gatt_set_local_mtu(131/*500*/);
     if (ret) {
-        ESP_LOGE(TAG, "set local MTU failed, error code = %x", ret);
+        ESP_LOGE(TAG, "%s: set local MTU failed, error code = %x", __func__, ret);
     }
 
     /* set the security iocap & auth_req & key size & init key response key parameters to the stack*/

@@ -39,22 +39,10 @@
 MessageBufferHandle_t ancs_message_buffer;
 
 static uint8_t adv_config_done = 0;
-static void periodic_timer_callback(void* arg);
-
-static esp_timer_create_args_t periodic_timer_args = {
-    .callback = &periodic_timer_callback,
-    /* name is optional, but may help identify the timer when debugging */
-    .name = "periodic"
-};
 
 static StaticMessageBuffer_t message_buffer_struct;
 
 static uint8_t message_buffer_storage[MESSAGE_BUFFER_STORAGE_SIZE];
-
-struct data_source_buffer {
-    uint8_t buffer[1024];
-    uint16_t len;
-};
 
 // ANCS UUID: 7905F431-B5CE-4E99-A40F-4B1E122D00D0
 // In its basic form, the ANCS exposes three characteristics:
@@ -159,16 +147,12 @@ struct gattc_profile_inst {
     esp_bd_addr_t remote_bda;
     uint16_t MTU_size;
 
-    esp_timer_handle_t periodic_timer; /*TODO: remove*/
-
     char device_name[64];
     uint16_t appearance;
 
     ble_ancs_c_t ble_ancs_inst;
 
     uint8_t attr_buffer[512];
-
-    struct data_source_buffer data_buffer; /*TODO: remove*/
 };
 
 static struct gattc_profile_inst gl_profile_tab[PROFILE_NUM] = {
@@ -190,123 +174,35 @@ static struct gattc_profile_inst gl_profile_tab[PROFILE_NUM] = {
     },
 };
 
-esp_noti_attr_list_t p_attr[8] = {
-    [attr_appidentifier_index] = {
-        .noti_attribute_id = NotificationAttributeIDAppIdentifier,
-        .attribute_len = 0,
-    },
-    [attr_title_index] = {
-        .noti_attribute_id = NotificationAttributeIDTitle,
-        .attribute_len = 0xFFFF,
-    },
-    [attr_subtitle_index] = {
-        .noti_attribute_id = NotificationAttributeIDSubtitle,
-        .attribute_len = 0xFFFF,
-    },
-    [attr_message_index] = {
-        .noti_attribute_id = NotificationAttributeIDMessage,
-        .attribute_len = 0xFFFF,
-    },
-    [attr_messagesize_index] = {
-        .noti_attribute_id = NotificationAttributeIDMessageSize,
-        .attribute_len = 0,
-    },
-    [attr_date_index] = {
-        .noti_attribute_id = NotificationAttributeIDDate,
-        .attribute_len = 0,
-    },
-    [attr_positiveactionlabel_index] = {
-        .noti_attribute_id = NotificationAttributeIDPositiveActionLabel,
-        .attribute_len = 0,
-    },
-    [attr_negativeactionlabel_index] = {
-        .noti_attribute_id = NotificationAttributeIDNegativeActionLabel,
-        .attribute_len = 0,
-    },
+typedef enum {
+   Unknown_command   = (0xA0), //The commandID was not recognized by the NP.
+   Invalid_command   = (0xA1), //The command was improperly formatted.
+   Invalid_parameter = (0xA2), // One of the parameters (for example, the NotificationUID) does not refer to an existing object on the NP.
+   Action_failed     = (0xA3), //The action was not performed
+} esp_error_code;
 
-};
-
-/*
-    | CommandID(1 Byte) | NotificationUID(4 Bytes) | AttributeIDs |
-*/
-
-void esp_get_notification_attributes(int idx, uint8_t *notificationUID, uint8_t num_attr, esp_noti_attr_list_t *p_attr)
+static char *Errcode_to_String(uint16_t status)
 {
-    uint8_t cmd[600] = {0};
-    uint32_t index = 0;
-    cmd[0] = CommandIDGetNotificationAttributes;
-    index ++;
-    memcpy(&cmd[index], notificationUID, ESP_NOTIFICATIONUID_LEN);
-    index += ESP_NOTIFICATIONUID_LEN;
-    while(num_attr > 0) {
-        cmd[index ++] = p_attr->noti_attribute_id;
-        if (p_attr->attribute_len > 0) {
-            cmd[index ++] = p_attr->attribute_len;
-            cmd[index ++] = (p_attr->attribute_len << 8);
-        }
-        p_attr ++;
-        num_attr --;
+    char *Errstr = NULL;
+    switch (status) {
+        case Unknown_command:
+            Errstr = "Unknown_command";
+            break;
+        case Invalid_command:
+            Errstr = "Invalid_command";
+            break;
+        case Invalid_parameter:
+            Errstr = "Invalid_parameter";
+            break;
+        case Action_failed:
+            Errstr = "Action_failed";
+            break;
+        default:
+            Errstr = "unknown_failed";
+            break;
     }
+    return Errstr;
 
-    esp_ble_gattc_write_char( gl_profile_tab[idx].gattc_if,
-                              gl_profile_tab[idx].conn_id,
-                              gl_profile_tab[idx].anc.control_point_char_elem.char_handle,
-                              index,
-                              cmd,
-                              ESP_GATT_WRITE_TYPE_RSP,
-                              ESP_GATT_AUTH_REQ_NONE);
-}
-
-void esp_get_app_attributes(uint8_t *appidentifier, uint16_t appidentifier_len, uint8_t num_attr, uint8_t *p_app_attrs)
-{
-    uint8_t buffer[600] = {0};
-    uint32_t index = 0;
-    buffer[0] = CommandIDGetAppAttributes;
-    index ++;
-    memcpy(&buffer[index], appidentifier, appidentifier_len);
-    index += appidentifier_len;
-    memcpy(&buffer[index], p_app_attrs, num_attr);
-    index += num_attr;
-
-    esp_ble_gattc_write_char( gl_profile_tab[PROFILE_A_APP_ID].gattc_if,
-                              gl_profile_tab[PROFILE_A_APP_ID].conn_id,
-                              gl_profile_tab[PROFILE_A_APP_ID].anc.control_point_char_elem.char_handle,
-                              index,
-                              buffer,
-                              ESP_GATT_WRITE_TYPE_RSP,
-                              ESP_GATT_AUTH_REQ_NONE);
-}
-
-void esp_perform_notification_action(int idx, uint8_t *notificationUID, uint8_t ActionID)
-{
-    uint8_t buffer[600] = {0};
-    uint32_t index = 0;
-    buffer[0] = CommandIDPerformNotificationAction;
-    index ++;
-    memcpy(&buffer[index], notificationUID, ESP_NOTIFICATIONUID_LEN);
-    index += ESP_NOTIFICATIONUID_LEN;
-    buffer[index] = ActionID;
-    index ++;
-    esp_ble_gattc_write_char( gl_profile_tab[idx].gattc_if,
-                              gl_profile_tab[idx].conn_id,
-                              gl_profile_tab[idx].anc.control_point_char_elem.char_handle,
-                              index,
-                              buffer,
-                              ESP_GATT_WRITE_TYPE_RSP,
-                              ESP_GATT_AUTH_REQ_NONE);
-}
-
-static void periodic_timer_callback(void* arg)
-{
-    int idx = (int)arg;
-
-    ESP_LOGV(TAG, "periodic_timer_callback");
-    esp_timer_stop(gl_profile_tab[idx].periodic_timer);
-    if (gl_profile_tab[idx].data_buffer.len > 0) {
-        esp_receive_apple_data_source(gl_profile_tab[idx].data_buffer.buffer, gl_profile_tab[idx].data_buffer.len);
-        memset(gl_profile_tab[idx].data_buffer.buffer, 0, gl_profile_tab[idx].data_buffer.len);
-        gl_profile_tab[idx].data_buffer.len = 0;
-    }
 }
 
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
@@ -646,35 +542,11 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         ESP_LOGV(TAG, "Rx notification: %u bytes", param->notify.value_len);
         esp_log_buffer_hex(TAG, param->notify.value, param->notify.value_len);
         if (param->notify.handle == gl_profile_tab[idx].anc.notification_source_char_elem.char_handle) {
-            // esp_receive_apple_notification_source(param->notify.value, param->notify.value_len);
-            // uint8_t *notificationUID = &param->notify.value[4];
-            // if (param->notify.value[0] == EventIDNotificationAdded && param->notify.value[2] == CategoryIDIncomingCall) {
-            //     ESP_LOGI(TAG, "IncomingCall, reject");
-            //     //Call reject
-            //     // esp_perform_notification_action(idx, notificationUID, ActionIDNegative);
-            // } else if (param->notify.value[0] == EventIDNotificationAdded) {
-            //     //get more information
-            //     ESP_LOGI(TAG, "Get detailed information");
-            //     esp_get_notification_attributes(idx, notificationUID, sizeof(p_attr)/sizeof(esp_noti_attr_list_t), p_attr);
-            // }
             esp_err_t ret_status = ble_ancs_parse_notif(&gl_profile_tab[idx].ble_ancs_inst, param->notify.value, param->notify.value_len);
             if (ret_status != ESP_GATT_OK) {
                 ESP_LOGE(TAG, "ble_ancs_parse_notif failed, error status = %x", ret_status);
             }
         } else if (param->notify.handle == gl_profile_tab[idx].anc.data_source_char_elem.char_handle) {
-            // /* TODO: Remove data_buffer accum, remove timer and parse data stream by esp_receive_apple_data_source() */
-            // memcpy(&gl_profile_tab[idx].data_buffer.buffer[gl_profile_tab[idx].data_buffer.len], param->notify.value, param->notify.value_len);
-            // gl_profile_tab[idx].data_buffer.len += param->notify.value_len;
-            // if (param->notify.value_len == (gl_profile_tab[idx].MTU_size - 3)) {
-            //     // copy and wait next packet, start timer 500ms
-            //     ESP_LOGV(TAG, "Starting timer");
-            //     esp_timer_start_periodic(gl_profile_tab[idx].periodic_timer, 500000);
-            // } else {
-            //     esp_timer_stop(gl_profile_tab[idx].periodic_timer);
-            //     esp_receive_apple_data_source(gl_profile_tab[idx].data_buffer.buffer, gl_profile_tab[idx].data_buffer.len);
-            //     memset(gl_profile_tab[idx].data_buffer.buffer, 0, gl_profile_tab[idx].data_buffer.len);
-            //     gl_profile_tab[idx].data_buffer.len = 0;
-            // }
             ble_ancs_parse_get_attrs_response(&gl_profile_tab[idx].ble_ancs_inst, param->notify.value, param->notify.value_len);
         } else {
             ESP_LOGI(TAG, "unknown handle, receive notify value:");
@@ -941,12 +813,6 @@ static void ancs_c_evt_handler(ble_ancs_c_evt_t * p_evt, void *ctx)
     }
 }
 
-void init_timer(int idx)
-{
-    periodic_timer_args.arg = (void *)idx;
-    ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &gl_profile_tab[idx].periodic_timer));
-}
-
 esp_err_t ancs_init(void)
 {
     esp_err_t ret;
@@ -997,12 +863,6 @@ esp_err_t ancs_init(void)
         gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].attr_len = sizeof(gl_profile_tab[PROFILE_D_APP_ID].attr_buffer);
         gl_profile_tab[PROFILE_D_APP_ID].ble_ancs_inst.ancs_notif_attr_list[id].p_attr_data = gl_profile_tab[PROFILE_D_APP_ID].attr_buffer;
     }
-
-    // init timer
-    init_timer(PROFILE_A_APP_ID);
-    init_timer(PROFILE_B_APP_ID);
-    init_timer(PROFILE_C_APP_ID);
-    init_timer(PROFILE_D_APP_ID);
 
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
 

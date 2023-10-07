@@ -150,6 +150,7 @@ struct gattc_profile_inst {
     uint16_t MTU_size;
 
     ble_ancs_c_t ble_ancs_inst;
+    uint32_t pending_notifs;
 
     union {
         struct { uint8_t id; char text[MAX_NOTIF_ATTR_SIZE]; };
@@ -540,6 +541,20 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             }
         } else if (param->notify.handle == gl_profile_tab[idx].anc.data_source_char_elem.char_handle) {
             ble_ancs_parse_get_attrs_response(&gl_profile_tab[idx].ble_ancs_inst, param->notify.value, param->notify.value_len);
+
+            /* Get other pending notifications */
+            if (ble_ancs_all_req_attrs_parsed(&gl_profile_tab[idx].ble_ancs_inst) &&
+                gl_profile_tab[idx].ble_ancs_inst.parse_info.parse_state == BLE_ANCS_ATTR_DONE &&
+                gl_profile_tab[idx].pending_notifs > 0) {
+
+                ESP_LOGI(TAG, "Last Attribute, %"PRIu32" notifs pending", gl_profile_tab[idx].pending_notifs);
+
+                // Assume next notifs has the same requested attrs count
+                gl_profile_tab[idx].ble_ancs_inst.parse_info.parse_state = BLE_ANCS_COMMAND_ID;
+                gl_profile_tab[idx].ble_ancs_inst.parse_info.expected_number_of_attrs = gl_profile_tab[idx].ble_ancs_inst.number_of_requested_attr;
+                ESP_LOGI(TAG, "Expecting %"PRIu32" more attrs", gl_profile_tab[idx].ble_ancs_inst.number_of_requested_attr);
+            }
+
         } else {
             ESP_LOGI(TAG, "unknown handle, receive notify value:");
         }
@@ -741,7 +756,7 @@ static void notif_attr_print(ble_ancs_c_attr_t * p_attr)
  *
  * @param[in] p_attr Pointer to an iOS App attribute.
  */
-static void app_attr_print(ble_ancs_c_attr_t * p_attr)
+/*static void app_attr_print(ble_ancs_c_attr_t * p_attr)
 {
     if (p_attr->attr_len != 0)
     {
@@ -751,7 +766,7 @@ static void app_attr_print(ble_ancs_c_attr_t * p_attr)
     {
         ESP_LOGI(TAG, "AA %s: <No Data>", lit_appid[p_attr->attr_id]);
     }
-}
+}*/
 
 static void send_to_stream(const uint8_t *data, size_t len) {
     size_t sent = xMessageBufferSend(ancs_message_buffer, data, len, 0);
@@ -778,7 +793,9 @@ static void ancs_c_evt_handler(ble_ancs_c_evt_t * p_evt, void *ctx)
     uint32_t len;
     uint32_t idx = (uint32_t)ctx;
 
-    ESP_LOGV(TAG, "ancs_c_evt_handler: %u uid=%"PRIu32, p_evt->evt_type, p_evt->notif.notif_uid);
+    ESP_LOGV(TAG, "ancs_c_evt_handler: %u uid=%"PRIu32" ~uid=%"PRIu32, p_evt->evt_type, p_evt->notif.notif_uid, p_evt->notif_uid);
+
+    vTaskDelay(1); // Reset WDT in case of multiple consecutive reads
 
     switch (p_evt->evt_type)
     {
@@ -807,7 +824,8 @@ static void ancs_c_evt_handler(ble_ancs_c_evt_t * p_evt, void *ctx)
                     ESP_LOGE(TAG, "esp_ble_gattc_write_char failed");
                     break;
                 }
-                // esp_get_notification_attributes(idx, &p_evt->notif.notif_uid, sizeof(p_attr)/sizeof(esp_noti_attr_list_t), p_attr);
+
+                gl_profile_tab[idx].pending_notifs ++;
             }
             break;
 
@@ -826,6 +844,8 @@ static void ancs_c_evt_handler(ble_ancs_c_evt_t * p_evt, void *ctx)
                 send_to_stream(gl_profile_tab[idx].device_name.data, 1 + strlen(gl_profile_tab[idx].device_name.text));
                 uint8_t term = ANCS_ATTR_TAG_TERMINATOR;
                 send_to_stream(&term, 1);
+
+                gl_profile_tab[idx].pending_notifs --;
             }
 
             break;

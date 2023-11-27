@@ -57,7 +57,7 @@ esp_gatt_status_t ble_utils_get_char (
 
         if ((memcmp(&(char_elem->uuid), &char_uuid, sizeof(char_elem->uuid)) == 0) &&
             ((char_elem->properties & char_props) != 0)) {
-            ESP_LOGI(TAG, "Found characteristic at position %u UUID16=%04X", i, char_elem->uuid.uuid.uuid16);
+            ESP_LOGD(TAG, "Found characteristic at position %u UUID16=%04X", i, char_elem->uuid.uuid.uuid16);
 
             return ESP_GATT_OK;
         }
@@ -113,7 +113,7 @@ esp_gatt_status_t ble_utils_get_descr (
 
         if ((descr_elem->uuid.len == ESP_UUID_LEN_16) &&
             (descr_elem->uuid.uuid.uuid16 == ESP_GATT_UUID_CHAR_CLIENT_CONFIG)) {
-            ESP_LOGI(TAG, "Found CCCD at position %u", i);
+            ESP_LOGD(TAG, "Found CCCD at position %u", i);
 
             return ESP_GATT_OK;
         }

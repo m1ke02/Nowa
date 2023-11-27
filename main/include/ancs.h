@@ -2,24 +2,24 @@
 
 #include <stdio.h>
 #include "esp_system.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/message_buffer.h"
+#include "ble_ancs_utils.h"
 
-extern MessageBufferHandle_t ancs_message_buffer;
+typedef struct {
+    void (*connect)(uint8_t idx, uint8_t bda[6]);
+    void (*disconnect)(uint8_t idx);
+    void (*device_name)(uint8_t idx, char *name);
+    void (*notification)(uint8_t idx, ble_ancs_c_evt_notif_t *notif);
+    void (*attribute)(uint8_t idx, uint32_t uid, ble_ancs_c_evt_notif_t *notif, ble_ancs_c_attr_t *attr);
+} ancs_handlers_t;
 
-typedef enum {
-    ANCS_ATTR_TAG_APP_IDENTIFIER = 0,
-    ANCS_ATTR_TAG_TITLE = 1,
-    ANCS_ATTR_TAG_SUBTITLE = 2,
-    ANCS_ATTR_TAG_MESSAGE = 3,
-    ANCS_ATTR_TAG_MESSAGE_SIZE = 4,
-    ANCS_ATTR_TAG_DATE = 5,
-    ANCS_ATTR_TAG_POSITIVE_ACTION_LABEL = 6,
-    ANCS_ATTR_TAG_NEGATIVE_ACTION_LABEL = 7,
-    ANCS_ATTR_TAG_DEVICE_NAME = 0xFE,
-    ANCS_ATTR_TAG_TERMINATOR = 0xFF,
-} ancs_attr_tag_t;
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-esp_err_t ancs_init(void);
+esp_err_t ancs_init(ancs_handlers_t *h);
+bool ancs_send_attrs_request(uint8_t idx, uint32_t uid, const ble_ancs_c_notif_attr_id_val_t attrs[], uint32_t attrs_length);
 void ancs_dump_device_list(FILE *stream, const char *endl);
-void ancs_dump_notification_list(FILE *stream, const char *endl);
+
+#ifdef __cplusplus
+}
+#endif

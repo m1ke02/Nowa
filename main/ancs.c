@@ -1,5 +1,6 @@
 #include "ancs.h"
 #include <inttypes.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -7,6 +8,7 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_bt.h"
+#include "esp_task.h"
 
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
@@ -15,7 +17,6 @@
 #include "esp_gattc_api.h"
 #include "esp_gatt_defs.h"
 #include "esp_gatt_common_api.h"
-#include "ble_ancs_utils.h"
 #include "ble_utils.h"
 #include "esp_timer.h"
 
@@ -38,13 +39,10 @@
 
 #define MAX_NOTIF_ATTR_SIZE                       511
 
-MessageBufferHandle_t ancs_message_buffer;
-
 static uint8_t adv_config_done = 0;
 
-static StaticMessageBuffer_t message_buffer_struct;
-
-static uint8_t message_buffer_storage[MESSAGE_BUFFER_STORAGE_SIZE];
+// Driver API
+static ancs_handlers_t handlers;
 
 // ANCS UUID: 7905F431-B5CE-4E99-A40F-4B1E122D00D0
 // In its basic form, the ANCS exposes three characteristics:
@@ -152,15 +150,10 @@ struct gattc_profile_inst {
     ble_ancs_c_t ble_ancs_inst;
     uint32_t pending_notifs;
 
-    union {
-        struct { uint8_t id; char text[MAX_NOTIF_ATTR_SIZE]; };
-        uint8_t data[MAX_NOTIF_ATTR_SIZE + 1];
-    } attr_buffer;
+    uint8_t attr_buffer[MAX_NOTIF_ATTR_SIZE];
+    uint8_t device_name[64]; // Must be <= MAX_NOTIF_ATTR_SIZE
 
-    union {
-        struct { uint8_t id; char text[63]; };
-        uint8_t data[64]; // Must be <= MAX_NOTIF_ATTR_SIZE
-    } device_name;
+    esp_timer_handle_t timer;
 
     uint16_t appearance;
 };
@@ -168,10 +161,10 @@ struct gattc_profile_inst {
 static struct gattc_profile_inst gl_profile_tab[PROFILE_NUM];
 
 typedef enum {
-   Unknown_command   = (0xA0), //The commandID was not recognized by the NP.
-   Invalid_command   = (0xA1), //The command was improperly formatted.
-   Invalid_parameter = (0xA2), // One of the parameters (for example, the NotificationUID) does not refer to an existing object on the NP.
-   Action_failed     = (0xA3), //The action was not performed
+    Unknown_command   = (0xA0), //The commandID was not recognized by the NP.
+    Invalid_command   = (0xA1), //The command was improperly formatted.
+    Invalid_parameter = (0xA2), // One of the parameters (for example, the NotificationUID) does not refer to an existing object on the NP.
+    Action_failed     = (0xA3), //The action was not performed
 } esp_error_code;
 
 static char *Errcode_to_String(uint16_t status)
@@ -224,12 +217,12 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
         ESP_LOGI(TAG, "advertising start success");
         break;
     case ESP_GAP_BLE_PASSKEY_REQ_EVT:                           /* passkey request event */
-        ESP_LOGI(TAG, "ESP_GAP_BLE_PASSKEY_REQ_EVT");
+        ESP_LOGD(TAG, "ESP_GAP_BLE_PASSKEY_REQ_EVT");
         /* Call the following function to input the passkey which is displayed on the remote device */
         //esp_ble_passkey_reply(heart_rate_profile_tab[HEART_PROFILE_APP_IDX].remote_bda, true, 0x00);
         break;
     case ESP_GAP_BLE_OOB_REQ_EVT: {
-        ESP_LOGI(TAG, "ESP_GAP_BLE_OOB_REQ_EVT");
+        ESP_LOGD(TAG, "ESP_GAP_BLE_OOB_REQ_EVT");
         uint8_t tk[16] = {1}; //If you paired with OOB, both devices need to use the same tk
         esp_ble_oob_req_reply(param->ble_security.ble_req.bd_addr, tk, sizeof(tk));
         break;
@@ -238,7 +231,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
         /* The app will receive this evt when the IO has DisplayYesNO capability and the peer device IO also has DisplayYesNo capability.
         show the passkey number to the user to confirm it with the number displayed by peer device. */
         esp_ble_confirm_reply(param->ble_security.ble_req.bd_addr, true);
-        ESP_LOGI(TAG, "ESP_GAP_BLE_NC_REQ_EVT, the passkey Notify number:%" PRIu32, param->ble_security.key_notif.passkey);
+        ESP_LOGD(TAG, "ESP_GAP_BLE_NC_REQ_EVT, the passkey Notify number:%" PRIu32, param->ble_security.key_notif.passkey);
         break;
     case ESP_GAP_BLE_SEC_REQ_EVT:
         /* send the positive(true) security response to the peer device to accept the security request.
@@ -247,13 +240,13 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
         break;
     case ESP_GAP_BLE_PASSKEY_NOTIF_EVT:  ///the app will receive this evt when the IO  has Output capability and the peer device IO has Input capability.
         ///show the passkey number to the user to input it in the peer device.
-        ESP_LOGI(TAG, "The passkey Notify number:%06" PRIu32, param->ble_security.key_notif.passkey);
+        ESP_LOGD(TAG, "The passkey Notify number:%06" PRIu32, param->ble_security.key_notif.passkey);
         break;
     case ESP_GAP_BLE_AUTH_CMPL_EVT: {
         esp_log_buffer_hex("addr", param->ble_security.auth_cmpl.bd_addr, ESP_BD_ADDR_LEN);
         ESP_LOGI(TAG, "pair status = %s",param->ble_security.auth_cmpl.success ? "success" : "fail");
         if (!param->ble_security.auth_cmpl.success) {
-            ESP_LOGI(TAG, "fail reason = 0x%x",param->ble_security.auth_cmpl.fail_reason);
+            ESP_LOGE(TAG, "fail reason = 0x%x",param->ble_security.auth_cmpl.fail_reason);
         }
         break;
     }
@@ -278,6 +271,13 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
         }
 
         break;
+    case ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT:
+        if (param->read_rssi_cmpl.status != ESP_BT_STATUS_SUCCESS) {
+            ESP_LOGE(TAG, "read RSSI failed, error status = %x", param->read_rssi_cmpl.status);
+            break;
+        }
+        ESP_LOGI(TAG, "RSSI = %d", param->read_rssi_cmpl.rssi);
+        break;
     default:
         break;
     }
@@ -295,17 +295,19 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
 
     ESP_ERROR_CHECK(idx == PROFILE_NUM);
 
-    ESP_LOGV(TAG, "GATT_EVT (PRF %u), event %d", idx, event);
+    ESP_LOGV(TAG, "GATT_EVT[%u], event %d", idx, event);
 
     switch (event) {
     case ESP_GATTC_REG_EVT:
-        ESP_LOGI(TAG, "REG_EVT: AppId=%u GattcIf=%u", param->reg.app_id, gattc_if);
+        ESP_LOGV(TAG, "REG_EVT: AppId=%u GattcIf=%u", param->reg.app_id, gattc_if);
 
         if (gattc_if == gl_profile_tab[PROFILE_A_APP_ID].gattc_if) { // Run only once
             esp_ble_gap_set_device_name(DEVICE_NAME);
             esp_ble_gap_config_local_icon (ESP_BLE_APPEARANCE_GENERIC_WATCH);
-            //generate a resolvable random address
+            // generate a resolvable random address
             esp_ble_gap_config_local_privacy(true);
+
+            ESP_LOGV(TAG, "cMP = %d, ETBCP = %d, BT task priority = %d", configMAX_PRIORITIES, ESP_TASK_BT_CONTROLLER_PRIO, uxTaskPriorityGet(NULL));
         }
         break;
     case ESP_GATTC_OPEN_EVT:
@@ -313,7 +315,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             ESP_LOGE(TAG, "open failed, error status = %x", param->open.status);
             break;
         }
-        ESP_LOGI(TAG, "ESP_GATTC_OPEN_EVT conn_id=%u", param->open.conn_id);
+        ESP_LOGV(TAG, "ESP_GATTC_OPEN_EVT conn_id=%u", param->open.conn_id);
         gl_profile_tab[idx].conn_id = param->open.conn_id;
         esp_ble_set_encryption(param->open.remote_bda, ESP_BLE_SEC_ENCRYPT_MITM);
         esp_err_t mtu_ret = esp_ble_gattc_send_mtu_req (gattc_if, param->open.conn_id);
@@ -325,18 +327,18 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         if (param->cfg_mtu.status != ESP_GATT_OK) {
             ESP_LOGE(TAG,"config mtu failed, error status = %x", param->cfg_mtu.status);
         }
-        ESP_LOGI(TAG, "ESP_GATTC_CFG_MTU_EVT, Status %d, MTU %d, conn_id %d", param->cfg_mtu.status, param->cfg_mtu.mtu, param->cfg_mtu.conn_id);
+        ESP_LOGV(TAG, "ESP_GATTC_CFG_MTU_EVT, Status %d, MTU %d, conn_id %d", param->cfg_mtu.status, param->cfg_mtu.mtu, param->cfg_mtu.conn_id);
         gl_profile_tab[idx].MTU_size = param->cfg_mtu.mtu;
         // memcpy(anc_service_uuid.uuid.uuid128, Apple_NC_UUID, 16);
         // esp_ble_gattc_search_service(gl_profile_tab[idx].gattc_if, gl_profile_tab[idx].conn_id, &apple_nc_uuid);
         esp_ble_gattc_search_service(gl_profile_tab[idx].gattc_if, gl_profile_tab[idx].conn_id, NULL);
         break;
     case ESP_GATTC_SEARCH_RES_EVT: {
-        // ESP_LOGI(TAG, "ESP_GATTC_SEARCH_RES_EVT len=%u", param->search_res.srvc_id.uuid.len);
+        // ESP_LOGD(TAG, "ESP_GATTC_SEARCH_RES_EVT len=%u", param->search_res.srvc_id.uuid.len);
         // if (param->search_res.srvc_id.uuid.len == ESP_UUID_LEN_16) {
-        //     ESP_LOGI(TAG, "    UUID=%04X", param->search_res.srvc_id.uuid.uuid.uuid16);
+        //     ESP_LOGD(TAG, "    UUID=%04X", param->search_res.srvc_id.uuid.uuid.uuid16);
         // } else if (param->search_res.srvc_id.uuid.len == ESP_UUID_LEN_128) {
-        //     ESP_LOGI(TAG, "    UUID=%08X-%04X-%04X-%04X-%04X%04X%04X",
+        //     ESP_LOGD(TAG, "    UUID=%08X-%04X-%04X-%04X-%04X%04X%04X",
         //         *((unsigned int *)&(param->search_res.srvc_id.uuid.uuid.uuid128[12])),
         //         *((uint16_t *)&(param->search_res.srvc_id.uuid.uuid.uuid128[10])),
         //         *((uint16_t *)&(param->search_res.srvc_id.uuid.uuid.uuid128[8])),
@@ -346,7 +348,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         //         *((uint16_t *)&(param->search_res.srvc_id.uuid.uuid.uuid128[0]))
         //     );
         // }
-        // ESP_LOGI(TAG, "    StartHandle=%04X EndHandle=%04X", param->search_res.start_handle, param->search_res.end_handle);
+        // ESP_LOGD(TAG, "    StartHandle=%04X EndHandle=%04X", param->search_res.start_handle, param->search_res.end_handle);
         if (memcmp (&param->search_res.srvc_id.uuid, &anc_service_uuid, sizeof(anc_service_uuid)) == 0) {
             gl_profile_tab[idx].anc.service_start_handle = param->search_res.start_handle;
             gl_profile_tab[idx].anc.service_end_handle = param->search_res.end_handle;
@@ -361,7 +363,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         break;
     }
     case ESP_GATTC_SEARCH_CMPL_EVT:
-        ESP_LOGI(TAG, "ESP_GATTC_SEARCH_CMPL_EVT");
+        ESP_LOGV(TAG, "ESP_GATTC_SEARCH_CMPL_EVT");
 
         if (param->search_cmpl.status != ESP_GATT_OK) {
             ESP_LOGE(TAG, "search service failed, error status = %x", param->search_cmpl.status);
@@ -480,7 +482,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
 
     case ESP_GATTC_READ_CHAR_EVT:
         if (param->read.status != ESP_GATT_OK) {
-            ESP_LOGI(TAG, "ESP_GATTC_READ_CHAR_EVT status %d", param->reg_for_notify.status);
+            ESP_LOGE(TAG, "ESP_GATTC_READ_CHAR_EVT status %d", param->reg_for_notify.status);
             break;
         }
 
@@ -489,20 +491,23 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             uint16_t len = (param->read.value_len > sizeof(gl_profile_tab[idx].device_name)-1) ?
                 sizeof(gl_profile_tab[idx].device_name)-1 :
                 param->read.value_len;
-            memcpy(gl_profile_tab[idx].device_name.text, param->read.value, len);
-            gl_profile_tab[idx].device_name.text[len] = '\0';
-            ESP_LOGI(TAG, "Device name: '%s'", gl_profile_tab[idx].device_name.text);
+            memcpy(gl_profile_tab[idx].device_name, param->read.value, len);
+            gl_profile_tab[idx].device_name[len] = '\0';
+
+            if (handlers.device_name) handlers.device_name(idx, (char *)gl_profile_tab[idx].device_name);
+
         } else if (param->read.handle == gl_profile_tab[idx].gap.appearance_elem.char_handle) {
             // Store device appearance
             gl_profile_tab[idx].appearance = ((uint16_t)param->read.value[1] << 8) + param->read.value[0];
-            ESP_LOGI(TAG, "Appearance: %04X", gl_profile_tab[idx].appearance);
         }
-        // esp_log_buffer_hex("Data", param->read.value, param->read.value_len);
+
+        ESP_LOGD(TAG, "Read char: %u bytes", param->read.value_len);
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, param->read.value, param->read.value_len, ESP_LOG_DEBUG);
         break;
 
     case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
         if (param->reg_for_notify.status != ESP_GATT_OK) {
-            ESP_LOGI(TAG, "ESP_GATTC_REG_FOR_NOTIFY_EVT status %d", param->reg_for_notify.status);
+            ESP_LOGE(TAG, "ESP_GATTC_REG_FOR_NOTIFY_EVT status %d", param->reg_for_notify.status);
             break;
         }
 
@@ -531,9 +536,11 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         );
         break;
     }
+
     case ESP_GATTC_NOTIFY_EVT:
-        ESP_LOGV(TAG, "Rx notification: %u bytes", param->notify.value_len);
-        esp_log_buffer_hex(TAG, param->notify.value, param->notify.value_len);
+        ESP_LOGD(TAG, "RX notif: %u bytes", param->notify.value_len);
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, param->notify.value, param->notify.value_len, ESP_LOG_DEBUG);
+
         if (param->notify.handle == gl_profile_tab[idx].anc.notification_source_char_elem.char_handle) {
             esp_err_t ret_status = ble_ancs_parse_notif(&gl_profile_tab[idx].ble_ancs_inst, param->notify.value, param->notify.value_len);
             if (ret_status != ESP_GATT_OK) {
@@ -546,53 +553,55 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             if (ble_ancs_all_req_attrs_parsed(&gl_profile_tab[idx].ble_ancs_inst) &&
                 gl_profile_tab[idx].ble_ancs_inst.parse_info.parse_state == BLE_ANCS_ATTR_DONE &&
                 gl_profile_tab[idx].pending_notifs > 0) {
-
-                ESP_LOGI(TAG, "Last Attribute, %"PRIu32" notifs pending", gl_profile_tab[idx].pending_notifs);
-
+                ESP_LOGD(TAG, "Last Attribute, %" PRIu32 " notifs pending", gl_profile_tab[idx].pending_notifs);
                 // Assume next notifs has the same requested attrs count
                 gl_profile_tab[idx].ble_ancs_inst.parse_info.parse_state = BLE_ANCS_COMMAND_ID;
                 gl_profile_tab[idx].ble_ancs_inst.parse_info.expected_number_of_attrs = gl_profile_tab[idx].ble_ancs_inst.number_of_requested_attr;
-                ESP_LOGI(TAG, "Expecting %"PRIu32" more attrs", gl_profile_tab[idx].ble_ancs_inst.number_of_requested_attr);
+                ESP_LOGD(TAG, "Expecting %" PRIu32 " more attrs", gl_profile_tab[idx].ble_ancs_inst.number_of_requested_attr);
             }
 
         } else {
-            ESP_LOGI(TAG, "unknown handle, receive notify value:");
+            ESP_LOGW(TAG, "Unknown RX notif handle");
         }
         break;
     case ESP_GATTC_WRITE_DESCR_EVT:
         if (param->write.status != ESP_GATT_OK) {
-            ESP_LOGE(TAG, "write descr failed, error status = %x", param->write.status);
+            ESP_LOGE(TAG, "Write descr failed, error status = %x", param->write.status);
             break;
         }
         ESP_LOGI(TAG, "Descriptor written successfully");
         break;
     case ESP_GATTC_SRVC_CHG_EVT: {
-        ESP_LOGI(TAG, "ESP_GATTC_SRVC_CHG_EVT, bd_addr:");
-        esp_log_buffer_hex(TAG, param->srvc_chg.remote_bda, 6);
+        ESP_LOGD(TAG, "Service changed on BDA");
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, param->srvc_chg.remote_bda, 6, ESP_LOG_DEBUG);
         break;
     }
     case ESP_GATTC_WRITE_CHAR_EVT:
         if (param->write.status != ESP_GATT_OK) {
             char *Errstr = Errcode_to_String(param->write.status);
             if (Errstr) {
-                 ESP_LOGE(TAG, "write control point error %s", Errstr);
+                 ESP_LOGE(TAG, "Write control point error %s", Errstr);
             }
             break;
         }
-        //ESP_LOGI(TAG, "Write char success ");
+        ESP_LOGI(TAG, "Write char successful");
         break;
     case ESP_GATTC_DISCONNECT_EVT:
         // Every profile gets this notification
-        ESP_LOGI(TAG, "ESP_GATTC_DISCONNECT_EVT reason=0x%x", param->disconnect.reason);
+        ESP_LOGV(TAG, "ESP_GATTC_DISCONNECT_EVT reason=0x%x", param->disconnect.reason);
 
         if (memcmp(gl_profile_tab[idx].remote_bda, param->disconnect.remote_bda, 6) != 0) {
             break;
         }
 
-        ESP_LOGI(TAG, "Disconnecting this profile");
+        if (handlers.disconnect) handlers.disconnect(idx);
+
+        ESP_LOGV(TAG, "Disconnecting this profile");
         gl_profile_tab[idx].anc.service_found = false;
         gl_profile_tab[idx].gap.service_found = false;
         memset(gl_profile_tab[idx].remote_bda, 0, sizeof(gl_profile_tab[idx].remote_bda));
+
+        esp_timer_stop(gl_profile_tab[idx].timer);
 
         // must already be enabled
         // esp_ble_gap_start_advertising(&adv_params);
@@ -600,11 +609,11 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         break;
     case ESP_GATTC_CONNECT_EVT:
         // Every profile gets this notification
-        ESP_LOGI(TAG, "ESP_GATTC_CONNECT_EVT");
+        ESP_LOGV(TAG, "ESP_GATTC_CONNECT_EVT");
 
         if (idx == PROFILE_A_APP_ID) {
             esp_err_t ret = esp_ble_gap_start_advertising(&adv_params);
-            ESP_LOGI(TAG, "Advertising restart: %x", ret);
+            ESP_LOGV(TAG, "Advertising restart: %x", ret);
         }
 
         bool handled = false;
@@ -623,20 +632,32 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             break; // This profile is already in use
         }
 
-        ESP_LOGI(TAG, "Binding to this profile");
-        esp_log_buffer_hex("bda", param->connect.remote_bda, 6);
+        ESP_LOGV(TAG, "Binding BDA to profile %d", idx);
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, param->connect.remote_bda, 6, ESP_LOG_VERBOSE);
 
         memcpy(gl_profile_tab[idx].remote_bda, param->connect.remote_bda, 6);
+
+        esp_timer_start_periodic(gl_profile_tab[idx].timer, 100000ULL);
+
+        if (handlers.connect) handlers.connect(idx, param->connect.remote_bda);
 
         // create gattc virtual connection
         esp_ble_gattc_open(gl_profile_tab[idx].gattc_if, gl_profile_tab[idx].remote_bda, BLE_ADDR_TYPE_RANDOM, true);
         break;
     case ESP_GATTC_DIS_SRVC_CMPL_EVT:
-        ESP_LOGI(TAG, "ESP_GATTC_DIS_SRVC_CMPL_EVT");
+        ESP_LOGV(TAG, "ESP_GATTC_DIS_SRVC_CMPL_EVT");
         break;
     default:
         break;
     }
+}
+
+static void ancs_timer_cb(void *ctx)
+{
+    uint32_t idx = (uint32_t)ctx;
+
+    //ESP_LOGV(TAG, "Timer CB [%"PRIu32"]", idx);
+    esp_ble_gap_read_rssi(gl_profile_tab[idx].remote_bda);
 }
 
 static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
@@ -646,7 +667,7 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
         if (param->reg.status == ESP_GATT_OK) {
             gl_profile_tab[param->reg.app_id].gattc_if = gattc_if;
         } else {
-            ESP_LOGI(TAG, "Reg app failed, app_id %04x, status %d",
+            ESP_LOGE(TAG, "Reg app failed, app_id %04x, status %d",
                     param->reg.app_id,
                     param->reg.status);
             return;
@@ -657,127 +678,44 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
     gattc_profile_event_handler(event, gattc_if, param);
 }
 
-/**@brief String literals for the iOS notification categories. used then printing to UART. */
-static char const * lit_catid[BLE_ANCS_NB_OF_CATEGORY_ID] =
+bool ancs_send_attrs_request(uint8_t idx, uint32_t uid, const ble_ancs_c_notif_attr_id_val_t attrs[], uint32_t attrs_length)
 {
-    "Other",
-    "Incoming Call",
-    "Missed Call",
-    "Voice Mail",
-    "Social",
-    "Schedule",
-    "Email",
-    "News",
-    "Health And Fitness",
-    "Business And Finance",
-    "Location",
-    "Entertainment"
-};
+    static uint8_t attrs_request_buffer[BLE_ANCS_ATTR_DATA_MAX];
 
-/**@brief String literals for the iOS notification event types. Used then printing to UART. */
-static char const * lit_eventid[BLE_ANCS_NB_OF_EVT_ID] =
-{
-    "Added",
-    "Modified",
-    "Removed"
-};
-
-/**@brief String literals for the iOS notification attribute types. Used when printing to UART. */
-static char const * lit_attrid[BLE_ANCS_NB_OF_NOTIF_ATTR] =
-{
-    "App Identifier",
-    "Title",
-    "Subtitle",
-    "Message",
-    "Message Size",
-    "Date",
-    "Positive Action Label",
-    "Negative Action Label"
-};
-
-/**@brief String literals for the iOS notification attribute types. Used When printing to UART. */
-static char const * lit_appid[BLE_ANCS_NB_OF_APP_ATTR] =
-{
-    "Display Name"
-};
-
-/**@brief Function for printing an iOS notification.
- *
- * @param[in] p_notif  Pointer to the iOS notification.
- */
-static void notif_print(ble_ancs_c_evt_notif_t * p_notif)
-{
-    ESP_LOGI(TAG, "Notification");
-    ESP_LOGI(TAG, "Event:       %s", lit_eventid[p_notif->evt_id]);
-    ESP_LOGI(TAG, "Category ID: %s", lit_catid[p_notif->category_id]);
-    ESP_LOGI(TAG, "Category Cnt:%"PRIu8, p_notif->category_count);
-    ESP_LOGI(TAG, "UID:         %"PRIu32, p_notif->notif_uid);
-
-    ESP_LOGI(TAG, "Flags:");
-    if (p_notif->evt_flags.silent == 1)
-    {
-        ESP_LOGI(TAG, " Silent");
-    }
-    if (p_notif->evt_flags.important == 1)
-    {
-        ESP_LOGI(TAG, " Important");
-    }
-    if (p_notif->evt_flags.pre_existing == 1)
-    {
-        ESP_LOGI(TAG, " Pre-existing");
-    }
-    if (p_notif->evt_flags.positive_action == 1)
-    {
-        ESP_LOGI(TAG, " Positive Action");
-    }
-    if (p_notif->evt_flags.negative_action == 1)
-    {
-        ESP_LOGI(TAG, " Negative Action");
-    }
-}
-
-/**@brief Function for printing iOS notification attribute data.
- *
- * @param[in] p_attr Pointer to an iOS notification attribute.
- */
-static void notif_attr_print(ble_ancs_c_attr_t * p_attr)
-{
-    if (p_attr->attr_len != 0)
-    {
-        ESP_LOGI(TAG, "NA %s: %s", lit_attrid[p_attr->attr_id], p_attr->p_attr_data);
-    }
-    else if (p_attr->attr_len == 0)
-    {
-        ESP_LOGI(TAG, "NA %s: <No Data>", lit_attrid[p_attr->attr_id]);
-    }
-}
-
-/**@brief Function for printing iOS notification attribute data.
- *
- * @param[in] p_attr Pointer to an iOS App attribute.
- */
-/*static void app_attr_print(ble_ancs_c_attr_t * p_attr)
-{
-    if (p_attr->attr_len != 0)
-    {
-        ESP_LOGI(TAG, "AA %s: %s", lit_appid[p_attr->attr_id], p_attr->p_attr_data);
-    }
-    else if (p_attr->attr_len == 0)
-    {
-        ESP_LOGI(TAG, "AA %s: <No Data>", lit_appid[p_attr->attr_id]);
-    }
-}*/
-
-static void send_to_stream(const uint8_t *data, size_t len) {
-    size_t sent = xMessageBufferSend(ancs_message_buffer, data, len, 0);
-
-    if (sent != len) {
-        // TODO: Read and discard oldest element, then retry
-        ESP_LOGE(TAG, "%s: Not enough free space", __func__);
-        return;
+    // Reinit requested attribute list
+    memset(gl_profile_tab[idx].ble_ancs_inst.ancs_notif_attr_list, 0, sizeof(gl_profile_tab[idx].ble_ancs_inst.ancs_notif_attr_list));
+    for (uint32_t i = 0; i < attrs_length; i ++) {
+        esp_err_t ret = ble_ancs_add_notif_attr(&gl_profile_tab[idx].ble_ancs_inst, attrs[i], (uint8_t *)gl_profile_tab[idx].attr_buffer, sizeof(gl_profile_tab[idx].attr_buffer));
+        if (ret) {
+            ESP_LOGE(TAG, "%s: ble_ancs_add_notif_attr(%u) failed, error code = %x", __func__, attrs[i], ret);
+            return ret;
+        }
     }
 
-    ESP_LOGI(TAG, "Sent %u bytes", sent);
+    uint32_t len = ble_ancs_build_notif_attrs_request (&gl_profile_tab[idx].ble_ancs_inst, uid, attrs_request_buffer, sizeof(attrs_request_buffer));
+    if (len == 0) {
+        ESP_LOGE(TAG, "%s: ble_ancs_build_notif_attrs_request: out of memory", __func__);
+        return false;
+    }
+
+    ESP_LOGD(TAG, "Sending attrs request of %" PRIu32 " bytes", len);
+    ESP_LOG_BUFFER_HEX_LEVEL(TAG, attrs_request_buffer, len, ESP_LOG_DEBUG);
+    esp_err_t ret_status = esp_ble_gattc_write_char(gl_profile_tab[idx].gattc_if,
+                                                    gl_profile_tab[idx].conn_id,
+                                                    gl_profile_tab[idx].anc.control_point_char_elem.char_handle,
+                                                    len,
+                                                    attrs_request_buffer,
+                                                    ESP_GATT_WRITE_TYPE_RSP,
+                                                    ESP_GATT_AUTH_REQ_NONE);
+    if (ret_status != ESP_GATT_OK) {
+        ESP_LOGE(TAG, "%s: esp_ble_gattc_write_char failed", __func__);
+        return false;
+    }
+
+    gl_profile_tab[idx].ble_ancs_inst.parse_info.parse_state = BLE_ANCS_COMMAND_ID;
+    gl_profile_tab[idx].pending_notifs ++;
+
+    return true;
 }
 
 /**@brief Function for handling the Apple Notification Service client.
@@ -793,58 +731,21 @@ static void ancs_c_evt_handler(ble_ancs_c_evt_t * p_evt, void *ctx)
     uint32_t len;
     uint32_t idx = (uint32_t)ctx;
 
-    ESP_LOGV(TAG, "ancs_c_evt_handler: %u uid=%"PRIu32" ~uid=%"PRIu32, p_evt->evt_type, p_evt->notif.notif_uid, p_evt->notif_uid);
+    ESP_LOGV(TAG, "ancs_c_evt_handler(%u) uid=%" PRIu32 " ~uid=%" PRIu32, p_evt->evt_type, p_evt->notif.notif_uid, p_evt->notif_uid);
 
     vTaskDelay(1); // Reset WDT in case of multiple consecutive reads
 
     switch (p_evt->evt_type)
     {
         case BLE_ANCS_C_EVT_NOTIF:
-            notif_print(&p_evt->notif);
-
-            if (p_evt->notif.evt_id == BLE_ANCS_EVENT_ID_NOTIFICATION_ADDED || p_evt->notif.evt_id == BLE_ANCS_EVENT_ID_NOTIFICATION_MODIFIED) {
-                gl_profile_tab[idx].ble_ancs_inst.parse_info.parse_state = BLE_ANCS_COMMAND_ID;
-
-                // TODO: wait for next request if prev is pending
-
-                len = ble_ancs_build_notif_attrs_request (&gl_profile_tab[idx].ble_ancs_inst, p_evt->notif.notif_uid, attrs_request_buffer, sizeof(attrs_request_buffer));
-                if (len == 0) {
-                    ESP_LOGE(TAG, "ble_ancs_build_notif_attrs_request: out of memory");
-                    break;
-                }
-                esp_log_buffer_hex(TAG, attrs_request_buffer, len);
-                esp_err_t ret_status = esp_ble_gattc_write_char(gl_profile_tab[idx].gattc_if,
-                                                                gl_profile_tab[idx].conn_id,
-                                                                gl_profile_tab[idx].anc.control_point_char_elem.char_handle,
-                                                                len,
-                                                                attrs_request_buffer,
-                                                                ESP_GATT_WRITE_TYPE_RSP,
-                                                                ESP_GATT_AUTH_REQ_NONE);
-                if (ret_status != ESP_GATT_OK) {
-                    ESP_LOGE(TAG, "esp_ble_gattc_write_char failed");
-                    break;
-                }
-
-                gl_profile_tab[idx].pending_notifs ++;
-            }
+            if (handlers.notification) handlers.notification(idx, &p_evt->notif);
             break;
 
         case BLE_ANCS_C_EVT_NOTIF_ATTRIBUTE:
-            notif_attr_print(&p_evt->attr);
-
-            if (p_evt->attr.attr_len != 0) {
-                // Add attribute ID & attribute text to stream buffer
-                gl_profile_tab[idx].attr_buffer.id = (uint8_t)p_evt->attr.attr_id;
-                send_to_stream(gl_profile_tab[idx].attr_buffer.data, 1 + strlen(gl_profile_tab[idx].attr_buffer.text));
-            }
+            if (handlers.attribute) handlers.attribute(idx, p_evt->notif_uid, &p_evt->notif, &p_evt->attr);
 
             // Is it the last attribute?
             if (ble_ancs_all_req_attrs_parsed(&gl_profile_tab[idx].ble_ancs_inst)) {
-                gl_profile_tab[idx].device_name.id = ANCS_ATTR_TAG_DEVICE_NAME;
-                send_to_stream(gl_profile_tab[idx].device_name.data, 1 + strlen(gl_profile_tab[idx].device_name.text));
-                uint8_t term = ANCS_ATTR_TAG_TERMINATOR;
-                send_to_stream(&term, 1);
-
                 gl_profile_tab[idx].pending_notifs --;
             }
 
@@ -874,13 +775,24 @@ static esp_err_t ancs_profile_init(int idx) {
     };
 
     for (uint32_t id = 0; id < sizeof(attrs) / sizeof(attrs[0]); id ++) {
-        ret = ble_ancs_add_notif_attr(&gl_profile_tab[idx].ble_ancs_inst, attrs[id], (uint8_t *)gl_profile_tab[idx].attr_buffer.text, sizeof(gl_profile_tab[idx].attr_buffer.text));
+        ret = ble_ancs_add_notif_attr(&gl_profile_tab[idx].ble_ancs_inst, attrs[id], (uint8_t *)gl_profile_tab[idx].attr_buffer, sizeof(gl_profile_tab[idx].attr_buffer));
         if (ret) {
             ESP_LOGE(TAG, "%s: ble_ancs_add_notif_attr(%u) failed, error code = %x", __func__, attrs[id], ret);
             return ret;
         }
     }
     // ret = ble_ancs_add_app_attr(&gl_profile_tab[idx].ble_ancs_inst, BLE_ANCS_APP_ATTR_ID_DISPLAY_NAME, gl_profile_tab[idx].attr_buffer, sizeof(gl_profile_tab[idx].attr_buffer));
+
+    /*esp_timer_create_args_t ta = {
+        .arg = idx,
+        .dispatch_method = ESP_TIMER_TASK,
+        .callback = ancs_timer_cb
+    };
+    ret = esp_timer_create(&ta, &gl_profile_tab[idx].timer);
+    if (ret) {
+        ESP_LOGE(TAG, "%s: esp_timer_create failed, error code = %x", __func__, ret);
+        return ret;
+    }*/
 
     ret = esp_ble_gattc_app_register(idx);
     if (ret) {
@@ -891,18 +803,16 @@ static esp_err_t ancs_profile_init(int idx) {
     return ESP_OK;
 }
 
-esp_err_t ancs_init(void)
+esp_err_t ancs_init(ancs_handlers_t *h)
 {
     esp_err_t ret;
 
-    esp_log_level_set(TAG, ESP_LOG_VERBOSE);
-    esp_log_level_set("nvs", ESP_LOG_VERBOSE);
-
-    ancs_message_buffer = xMessageBufferCreateStatic(sizeof(message_buffer_storage), message_buffer_storage, &message_buffer_struct);
-    if (ancs_message_buffer == NULL) {
-        ESP_LOGE(TAG, "%s xMessageBufferCreateStatic failed", __func__);
+    if (h == NULL) {
+        ESP_LOGE(TAG, "%s: parameter check failed", __func__);
         return ESP_FAIL;
     }
+
+    handlers = *h;
 
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
 
@@ -1003,7 +913,7 @@ void ancs_dump_device_list(FILE *stream, const char *endl) {
             fprintf(stream, "[%i] %04x %s @ %02x:%02x:%02x:%02x:%02x:%02x%s",
                 idx+1,
                 gl_profile_tab[idx].appearance,
-                gl_profile_tab[idx].device_name.text,
+                gl_profile_tab[idx].device_name,
                 gl_profile_tab[idx].remote_bda[0],
                 gl_profile_tab[idx].remote_bda[1],
                 gl_profile_tab[idx].remote_bda[2],
@@ -1016,47 +926,5 @@ void ancs_dump_device_list(FILE *stream, const char *endl) {
     }
     if (empty) {
         fprintf(stream, "<No devices>%s", endl);
-    }
-}
-
-void ancs_dump_notification_list(FILE *stream, const char *endl) {
-    union {
-        struct { uint8_t id; char text[MAX_NOTIF_ATTR_SIZE]; };
-        uint8_t data[MAX_NOTIF_ATTR_SIZE + 1];
-    } attr_buffer;
-
-    uint32_t ctr = 0;
-
-    while (true) {
-        size_t len = xMessageBufferReceive(ancs_message_buffer, attr_buffer.data, sizeof(attr_buffer), 0);
-        if (len == 0) {
-            // No more items
-            if (ctr == 0) {
-                fprintf(stream, "<No messages>%s", endl);
-            }
-            return;
-        }
-
-        if ((len > 1) && (len < sizeof(attr_buffer))) {
-            attr_buffer.data[len] = (uint8_t)'\0';
-        } else if (len == sizeof(attr_buffer)) {
-            attr_buffer.data[len - 1] = (uint8_t)'\0'; // Overwrite last char
-        }
-
-        switch (attr_buffer.id) {
-            case ANCS_ATTR_TAG_DEVICE_NAME:
-                fprintf(stream, "Dev %s%s", attr_buffer.text, endl);
-                break;
-            case ANCS_ATTR_TAG_APP_IDENTIFIER:
-                fprintf(stream, "App %s%s", attr_buffer.text, endl);
-                break;
-            case ANCS_ATTR_TAG_MESSAGE:
-                fprintf(stream, "Msg %s%s", attr_buffer.text, endl);
-                break;
-            case ANCS_ATTR_TAG_TERMINATOR:
-                fprintf(stream, "--- End of message %"PRIu32" ---%s%s", ctr + 1, endl, endl);
-                ctr ++;
-                break;
-        }
     }
 }

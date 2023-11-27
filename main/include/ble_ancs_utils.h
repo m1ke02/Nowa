@@ -1,9 +1,9 @@
+#pragma once
 /*
  * SPDX-FileCopyrightText: 2021 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Unlicense OR CC0-1.0
  */
-
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -213,6 +213,10 @@ typedef struct
     ble_ancs_c_evt_t                 evt;                                             //!< Allocate memory for the event here. The event is filled with several iterations of the @ref ancs_parse_get_attrs_response function when requesting iOS notification attributes.
 } ble_ancs_c_t;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 bool ble_ancs_all_req_attrs_parsed(ble_ancs_c_t * p_ancs);
 
 /**@brief Function for parsing notification or app attribute response data.
@@ -282,3 +286,7 @@ esp_err_t ble_ancs_add_app_attr(ble_ancs_c_t                     * p_ancs,
 esp_err_t ble_ancs_parse_notif(ble_ancs_c_t const * p_ancs,
                                uint8_t      const * p_data_src,
                                uint16_t     const   hvx_data_len);
+
+#ifdef __cplusplus
+}
+#endif

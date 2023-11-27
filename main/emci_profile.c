@@ -59,7 +59,6 @@ emci_status_t device_list_handler(uint8_t argc, emci_arg_t *argv, emci_env_t *en
 
 emci_status_t notification_list_handler(uint8_t argc, emci_arg_t *argv, emci_env_t *env)
 {
-    ancs_dump_notification_list ((FILE *)env->extra, EMCI_ENDL);
     return EMCI_STATUS_OK;
 }
 

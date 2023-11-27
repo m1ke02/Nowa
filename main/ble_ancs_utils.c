@@ -5,7 +5,7 @@
 #include "ble_ancs_utils.h"
 #include "ancs.h"
 
-#define TAG "ANCS"
+#define TAG "ANCS_UTILS"
 
 /**@brief Function for encoding a uint16 value.
  *
@@ -416,7 +416,7 @@ void ble_ancs_parse_get_attrs_response(ble_ancs_c_t  * p_ancs,
                 break;
 
             case BLE_ANCS_ATTR_DONE:
-                ESP_LOGD(TAG, "Parse state: Done ");
+                ESP_LOGD(TAG, "Parse state: Done");
                 index = hvx_data_len;
                 break;
 

@@ -1,6 +1,6 @@
 idf_component_register(
 SRCS
-    "main.c"
+    "main.cpp"
     "tcp_server.c"
     "connect.c"
     "protocol_examples_utils.c"
@@ -12,6 +12,7 @@ SRCS
     "ble_ancs_utils.c"
     "ancs.c"
     "ble_utils.c"
+    "dispatcher.cpp"
 INCLUDE_DIRS
     "."
     "include"

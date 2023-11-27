@@ -12,11 +12,19 @@
 
 #include "lwip/sockets.h"
 
-// static const char *TAG = "main";
+#include "dispatcher.h"
 
-void app_main(void)
+#define TAG "MAIN"
+
+extern "C" void app_main(void)
 {
     esp_err_t ret;
+
+    esp_log_level_set("nvs", ESP_LOG_VERBOSE);
+    esp_log_level_set("ANCS", ESP_LOG_DEBUG);
+    esp_log_level_set("BLE_UTILS", ESP_LOG_INFO);
+    esp_log_level_set("ANCS_UTILS", ESP_LOG_INFO);
+    esp_log_level_set("DISP", ESP_LOG_INFO);
 
     // Initialize NVS.
     ret = nvs_flash_init();
@@ -26,22 +34,22 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    ESP_ERROR_CHECK(ancs_init());
+    ESP_ERROR_CHECK(disp_init());
 
-    ESP_ERROR_CHECK(esp_netif_init());
+    //ESP_ERROR_CHECK(esp_netif_init());
 
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    //ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
      * Read "Establishing Wi-Fi or Ethernet Connection" section in
      * examples/protocols/README.md for more information about this function.
      */
-    ESP_ERROR_CHECK(example_connect());
+    //ESP_ERROR_CHECK(example_connect());
 
 #ifdef CONFIG_EXAMPLE_IPV4
-    xTaskCreate(tcp_server_task, "tcp_server", 8192, (void*)AF_INET, 5, NULL);
+    //xTaskCreate(tcp_server_task, "tcp_server", 8192, (void*)AF_INET, 5, NULL);
 #endif
 #ifdef CONFIG_EXAMPLE_IPV6
-    xTaskCreate(tcp_server_task, "tcp_server", 8192, (void*)AF_INET6, 5, NULL);
+    //xTaskCreate(tcp_server_task, "tcp_server", 8192, (void*)AF_INET6, 5, NULL);
 #endif
 }

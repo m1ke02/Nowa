@@ -3,7 +3,7 @@
 #include "esp_log.h"
 #include <string.h>
 
-#define TAG "BLE_UTILS"
+#define TAG "BLEU"
 
 esp_gatt_status_t ble_utils_get_char (
     esp_gatt_if_t gattc_if,

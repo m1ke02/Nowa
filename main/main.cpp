@@ -8,7 +8,7 @@
 #include "esp_netif.h"
 #include "protocol_examples_common.h"
 #include "tcp_server.h"
-#include "ancs.h"
+#include "ble_ancs.h"
 
 #include "lwip/sockets.h"
 
@@ -22,8 +22,8 @@ extern "C" void app_main(void)
 
     esp_log_level_set("nvs", ESP_LOG_VERBOSE);
     esp_log_level_set("ANCS", ESP_LOG_DEBUG);
-    esp_log_level_set("BLE_UTILS", ESP_LOG_INFO);
-    esp_log_level_set("ANCS_UTILS", ESP_LOG_DEBUG);
+    esp_log_level_set("BLEU", ESP_LOG_INFO);
+    esp_log_level_set("ANCSU", ESP_LOG_DEBUG);
     esp_log_level_set("DISP", ESP_LOG_INFO);
 
     // Initialize NVS.

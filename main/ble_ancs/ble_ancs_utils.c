@@ -3,9 +3,9 @@
 #include <inttypes.h>
 #include "esp_log.h"
 #include "ble_ancs_utils.h"
-#include "ancs.h"
+#include "ble_ancs.h"
 
-#define TAG "ANCS_UTILS"
+#define TAG "ANCSU"
 
 /**@brief Function for encoding a uint16 value.
  *

@@ -32,7 +32,6 @@
 #define PROFILE_B_APP_ID                          1
 #define PROFILE_C_APP_ID                          2
 #define PROFILE_D_APP_ID                          3
-#define PROFILE_NUM                               4
 #define ADV_CONFIG_FLAG                           (1 << 0)
 #define SCAN_RSP_CONFIG_FLAG                      (1 << 1)
 #define MESSAGE_BUFFER_STORAGE_SIZE               8192
@@ -148,7 +147,6 @@ struct gattc_profile_inst {
     uint16_t MTU_size;
 
     ble_ancs_c_t ble_ancs_inst;
-    uint32_t pending_notifs;
 
     uint8_t attr_buffer[MAX_NOTIF_ATTR_SIZE];
     uint8_t device_name[64]; // Must be <= MAX_NOTIF_ATTR_SIZE
@@ -158,7 +156,7 @@ struct gattc_profile_inst {
     uint16_t appearance;
 };
 
-static struct gattc_profile_inst gl_profile_tab[PROFILE_NUM];
+static struct gattc_profile_inst gl_profile_tab[ANCS_PROFILE_NUM];
 
 typedef enum {
     Unknown_command   = (0xA0), //The commandID was not recognized by the NP.
@@ -287,13 +285,13 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
 {
     // Get profile by GATT if number
     int idx;
-    for (idx = 0; idx < PROFILE_NUM; idx++) {
+    for (idx = 0; idx < ANCS_PROFILE_NUM; idx++) {
         if (gattc_if == gl_profile_tab[idx].gattc_if) {
             break;
         }
     }
 
-    ESP_ERROR_CHECK(idx == PROFILE_NUM);
+    ESP_ERROR_CHECK(idx == ANCS_PROFILE_NUM);
 
     ESP_LOGV(TAG, "GATT_EVT[%u], event %d", idx, event);
 
@@ -551,13 +549,12 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
 
             /* Get other pending notifications */
             if (ble_ancs_all_req_attrs_parsed(&gl_profile_tab[idx].ble_ancs_inst) &&
-                gl_profile_tab[idx].ble_ancs_inst.parse_info.parse_state == BLE_ANCS_ATTR_DONE &&
-                gl_profile_tab[idx].pending_notifs > 0) {
-                ESP_LOGD(TAG, "Last Attribute, %" PRIu32 " notifs pending", gl_profile_tab[idx].pending_notifs);
-                // Assume next notifs has the same requested attrs count
-                gl_profile_tab[idx].ble_ancs_inst.parse_info.parse_state = BLE_ANCS_COMMAND_ID;
-                gl_profile_tab[idx].ble_ancs_inst.parse_info.expected_number_of_attrs = gl_profile_tab[idx].ble_ancs_inst.number_of_requested_attr;
-                ESP_LOGD(TAG, "Expecting %" PRIu32 " more attrs", gl_profile_tab[idx].ble_ancs_inst.number_of_requested_attr);
+                gl_profile_tab[idx].ble_ancs_inst.parse_info.parse_state == BLE_ANCS_ATTR_DONE) {
+                ESP_LOGD(TAG, "All attrs processed, uid=%" PRIu32, gl_profile_tab[idx].ble_ancs_inst.evt.notif_uid);
+
+                if (handlers.attributes_done) handlers.attributes_done(idx, gl_profile_tab[idx].ble_ancs_inst.evt.notif_uid);
+            } else {
+                ESP_LOGD(TAG, "Ignoring");
             }
 
         } else {
@@ -601,7 +598,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         gl_profile_tab[idx].gap.service_found = false;
         memset(gl_profile_tab[idx].remote_bda, 0, sizeof(gl_profile_tab[idx].remote_bda));
 
-        esp_timer_stop(gl_profile_tab[idx].timer);
+        // esp_timer_stop(gl_profile_tab[idx].timer);
 
         // must already be enabled
         // esp_ble_gap_start_advertising(&adv_params);
@@ -617,7 +614,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         }
 
         bool handled = false;
-        for (int new_idx = 0; new_idx < PROFILE_NUM; new_idx++) {
+        for (int new_idx = 0; new_idx < ANCS_PROFILE_NUM; new_idx++) {
             if (memcmp(gl_profile_tab[new_idx].remote_bda, param->connect.remote_bda, 6) == 0) {
                 handled = true;
                 break;
@@ -637,7 +634,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
 
         memcpy(gl_profile_tab[idx].remote_bda, param->connect.remote_bda, 6);
 
-        esp_timer_start_periodic(gl_profile_tab[idx].timer, 100000ULL);
+        // esp_timer_start_periodic(gl_profile_tab[idx].timer, 100000ULL);
 
         if (handlers.connect) handlers.connect(idx, param->connect.remote_bda);
 
@@ -652,13 +649,13 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
     }
 }
 
-static void ancs_timer_cb(void *ctx)
+/*static void ancs_timer_cb(void *ctx)
 {
     uint32_t idx = (uint32_t)ctx;
 
     //ESP_LOGV(TAG, "Timer CB [%"PRIu32"]", idx);
     esp_ble_gap_read_rssi(gl_profile_tab[idx].remote_bda);
-}
+}*/
 
 static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
 {
@@ -713,7 +710,6 @@ bool ancs_send_attrs_request(uint8_t idx, uint32_t uid, const ble_ancs_c_notif_a
     }
 
     gl_profile_tab[idx].ble_ancs_inst.parse_info.parse_state = BLE_ANCS_COMMAND_ID;
-    gl_profile_tab[idx].pending_notifs ++;
 
     return true;
 }
@@ -727,8 +723,6 @@ bool ancs_send_attrs_request(uint8_t idx, uint32_t uid, const ble_ancs_c_notif_a
  */
 static void ancs_c_evt_handler(ble_ancs_c_evt_t * p_evt, void *ctx)
 {
-    static uint8_t attrs_request_buffer[BLE_ANCS_ATTR_DATA_MAX];
-    uint32_t len;
     uint32_t idx = (uint32_t)ctx;
 
     ESP_LOGV(TAG, "ancs_c_evt_handler(%u) uid=%" PRIu32 " ~uid=%" PRIu32, p_evt->evt_type, p_evt->notif.notif_uid, p_evt->notif_uid);
@@ -742,14 +736,9 @@ static void ancs_c_evt_handler(ble_ancs_c_evt_t * p_evt, void *ctx)
             break;
 
         case BLE_ANCS_C_EVT_NOTIF_ATTRIBUTE:
-            if (handlers.attribute) handlers.attribute(idx, p_evt->notif_uid, &p_evt->notif, &p_evt->attr);
-
-            // Is it the last attribute?
-            if (ble_ancs_all_req_attrs_parsed(&gl_profile_tab[idx].ble_ancs_inst)) {
-                gl_profile_tab[idx].pending_notifs --;
-            }
-
+            if (handlers.attribute) handlers.attribute(idx, p_evt->notif_uid, &p_evt->attr);
             break;
+
         default:
             // No implementation needed.
             break;
@@ -767,20 +756,6 @@ static esp_err_t ancs_profile_init(int idx) {
     gl_profile_tab[idx].ble_ancs_inst.evt_handler = ancs_c_evt_handler;
     gl_profile_tab[idx].ble_ancs_inst.ctx = (void *)idx;
 
-    const ble_ancs_c_notif_attr_id_val_t attrs[] = {
-        BLE_ANCS_NOTIF_ATTR_ID_APP_IDENTIFIER,
-        BLE_ANCS_NOTIF_ATTR_ID_TITLE,
-        BLE_ANCS_NOTIF_ATTR_ID_MESSAGE,
-        BLE_ANCS_NOTIF_ATTR_ID_DATE
-    };
-
-    for (uint32_t id = 0; id < sizeof(attrs) / sizeof(attrs[0]); id ++) {
-        ret = ble_ancs_add_notif_attr(&gl_profile_tab[idx].ble_ancs_inst, attrs[id], (uint8_t *)gl_profile_tab[idx].attr_buffer, sizeof(gl_profile_tab[idx].attr_buffer));
-        if (ret) {
-            ESP_LOGE(TAG, "%s: ble_ancs_add_notif_attr(%u) failed, error code = %x", __func__, attrs[id], ret);
-            return ret;
-        }
-    }
     // ret = ble_ancs_add_app_attr(&gl_profile_tab[idx].ble_ancs_inst, BLE_ANCS_APP_ATTR_ID_DISPLAY_NAME, gl_profile_tab[idx].attr_buffer, sizeof(gl_profile_tab[idx].attr_buffer));
 
     /*esp_timer_create_args_t ta = {
@@ -907,7 +882,7 @@ esp_err_t ancs_init(ancs_handlers_t *h)
 
 void ancs_dump_device_list(FILE *stream, const char *endl) {
     bool empty = true;
-    for (int idx = 0; idx < PROFILE_NUM; idx ++) {
+    for (int idx = 0; idx < ANCS_PROFILE_NUM; idx ++) {
         if (memcmp(gl_profile_tab[idx].remote_bda, "\x00\x00\x00\x00\x00\x00", 6) != 0) {
             empty = false;
             fprintf(stream, "[%i] %04x %s @ %02x:%02x:%02x:%02x:%02x:%02x%s",

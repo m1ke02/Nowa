@@ -23,7 +23,7 @@ extern "C" void app_main(void)
     esp_log_level_set("nvs", ESP_LOG_VERBOSE);
     esp_log_level_set("ANCS", ESP_LOG_DEBUG);
     esp_log_level_set("BLE_UTILS", ESP_LOG_INFO);
-    esp_log_level_set("ANCS_UTILS", ESP_LOG_INFO);
+    esp_log_level_set("ANCS_UTILS", ESP_LOG_DEBUG);
     esp_log_level_set("DISP", ESP_LOG_INFO);
 
     // Initialize NVS.

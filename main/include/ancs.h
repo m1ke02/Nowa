@@ -4,12 +4,15 @@
 #include "esp_system.h"
 #include "ble_ancs_utils.h"
 
+#define ANCS_PROFILE_NUM 4
+
 typedef struct {
     void (*connect)(uint8_t idx, uint8_t bda[6]);
     void (*disconnect)(uint8_t idx);
     void (*device_name)(uint8_t idx, char *name);
     void (*notification)(uint8_t idx, ble_ancs_c_evt_notif_t *notif);
-    void (*attribute)(uint8_t idx, uint32_t uid, ble_ancs_c_evt_notif_t *notif, ble_ancs_c_attr_t *attr);
+    void (*attribute)(uint8_t idx, uint32_t uid, ble_ancs_c_attr_t *attr);
+    void (*attributes_done)(uint8_t idx, uint32_t uid);
 } ancs_handlers_t;
 
 #ifdef __cplusplus

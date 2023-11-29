@@ -136,6 +136,7 @@ static ble_ancs_c_parse_state_t notif_uid_parse(ble_ancs_c_t  * p_ancs,
                                                 uint32_t      * index)
 {
      p_ancs->evt.notif_uid = uint32_decode(&p_data_src[*index]);
+     ESP_LOGD(TAG, "Notif UID %"PRIu32" ", p_ancs->evt.notif_uid);
      *index               += sizeof(uint32_t);
      return BLE_ANCS_ATTR_ID;
 }
@@ -379,6 +380,8 @@ void ble_ancs_parse_get_attrs_response(ble_ancs_c_t  * p_ancs,
 {
     uint32_t index;
 
+    ESP_LOGD(TAG, "Parse attrs enter: %u", p_ancs->parse_info.parse_state);
+
     for (index = 0; index < hvx_data_len;)
     {
         switch (p_ancs->parse_info.parse_state)
@@ -426,6 +429,8 @@ void ble_ancs_parse_get_attrs_response(ble_ancs_c_t  * p_ancs,
                 break;
         }
     }
+
+    ESP_LOGD(TAG, "Parse attrs exit: %u", p_ancs->parse_info.parse_state);
 }
 
 uint32_t ble_ancs_build_notif_attrs_request(ble_ancs_c_t * p_ancs,

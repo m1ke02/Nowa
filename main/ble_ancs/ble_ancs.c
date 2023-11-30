@@ -40,6 +40,8 @@
 
 static uint8_t adv_config_done = 0;
 
+static bool ble_already_init = false;
+
 // Driver API
 static ancs_handlers_t handlers;
 static void *context;
@@ -783,6 +785,11 @@ esp_err_t ancs_init(void *ctx, ancs_handlers_t *h)
 {
     esp_err_t ret;
 
+    if (ble_already_init) {
+        ESP_LOGW(TAG, "%s: already initialized", __func__);
+        return ESP_FAIL;
+    }
+
     if (h == NULL) {
         ESP_LOGE(TAG, "%s: parameter check failed", __func__);
         return ESP_FAIL;
@@ -790,8 +797,13 @@ esp_err_t ancs_init(void *ctx, ancs_handlers_t *h)
 
     handlers = *h;
     context = ctx;
+    ble_already_init = true; // Set before init to enable partial recovery via ancs_uninit()
 
-    ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
+    ret = esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
+    if (ret) {
+        ESP_LOGE(TAG, "%s: BT mem release failed: %s", __func__, esp_err_to_name(ret));
+        // ignore error
+    }
 
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     ret = esp_bt_controller_init(&bt_cfg);
@@ -880,6 +892,47 @@ esp_err_t ancs_init(void *ctx, ancs_handlers_t *h)
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(uint8_t));
 
     return ESP_OK;
+}
+
+esp_err_t ancs_deinit(void *ctx) {
+    (void)ctx;
+
+    esp_err_t ret;
+
+    if (!ble_already_init) {
+        ESP_LOGW(TAG, "%s: not yet initialized", __func__);
+        return ESP_FAIL;
+    }
+
+    ble_already_init = false; // Clear before deinit to enable partial recovery via ancs_init()
+
+    ret = esp_bluedroid_disable();
+    if (ret) {
+        ESP_LOGE(TAG, "%s: disable bluetooth failed: %s", __func__, esp_err_to_name(ret));
+        // ignore error
+    }
+    ret = esp_bluedroid_deinit();
+    if (ret) {
+        ESP_LOGE(TAG, "%s: deinit bluetooth failed: %s", __func__, esp_err_to_name(ret));
+        // ignore error
+    }
+
+    ret = esp_bt_controller_disable();
+    if (ret) {
+        ESP_LOGE(TAG, "%s: disable controller failed: %s", __func__, esp_err_to_name(ret));
+        // ignore error
+    }
+    ret = esp_bt_controller_deinit();
+    if (ret) {
+        ESP_LOGE(TAG, "%s: deinit controller failed: %s", __func__, esp_err_to_name(ret));
+        // ignore error
+    }
+
+    return ESP_OK;
+}
+
+bool ancs_is_initialized(void) {
+    return ble_already_init;
 }
 
 void ancs_dump_device_list(FILE *stream, const char *endl) {

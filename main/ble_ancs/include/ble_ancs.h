@@ -20,6 +20,8 @@ extern "C" {
 #endif
 
 esp_err_t ancs_init(void *ctx, ancs_handlers_t *h);
+esp_err_t ancs_deinit(void *ctx);
+bool ancs_is_initialized(void);
 bool ancs_send_attrs_request(uint8_t idx, uint32_t uid, const ble_ancs_c_notif_attr_id_val_t attrs[], uint32_t attrs_length);
 void ancs_dump_device_list(FILE *stream, const char *endl);
 

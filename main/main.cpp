@@ -9,6 +9,7 @@
 #include "protocol_examples_common.h"
 #include "tcp_server.h"
 #include "ble_ancs.h"
+#include "uart_console.h"
 
 #include "lwip/sockets.h"
 
@@ -27,6 +28,7 @@ extern "C" void app_main(void)
     esp_log_level_set("BLEU", ESP_LOG_INFO);
     esp_log_level_set("ANCSU", ESP_LOG_DEBUG);
     esp_log_level_set("DISP", ESP_LOG_INFO);
+    esp_log_level_set("CON", ESP_LOG_INFO);
 
     // Initialize NVS.
     ret = nvs_flash_init();
@@ -36,7 +38,11 @@ extern "C" void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    ESP_ERROR_CHECK(disp.initDriver());
+    //ESP_ERROR_CHECK(disp.initDriver());
+
+    ESP_ERROR_CHECK(con_init());
+
+    con_loop();
 
     //ESP_ERROR_CHECK(esp_netif_init());
 

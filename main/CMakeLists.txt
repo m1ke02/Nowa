@@ -6,6 +6,7 @@ SRCS
     "protocol_examples_utils.c"
     "wifi_connect.c"
     "emci_profile.c"
+    "uart_console.c"
 
     "../Emci/src/emci_arg.c"
     "../Emci/src/emci_parser.c"

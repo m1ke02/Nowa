@@ -3,7 +3,7 @@
 
 #define TAG "DISP"
 
-bool Dispatcher::connectNP(uint8_t idx, BDA bda) {
+bool Dispatcher::connectNP(uint8_t idx, const BDA& bda) {
 	if (idx >= m_activeBDAs.size()) {
 		ESP_LOGD(TAG, "Invalid index");
 		return false;
@@ -78,7 +78,7 @@ NotificationProvider *Dispatcher::getNPById(uint8_t idx) {
 	return &m_providerList[m_activeBDAs[idx]];
 }
 
-NotificationProvider *Dispatcher::getNPByBDA(BDA bda)
+NotificationProvider *Dispatcher::getNPByBDA(const BDA& bda)
 {
 	if (m_providerList.count(bda) == 0) {
 		ESP_LOGD(TAG, "NP not present");

@@ -28,3 +28,4 @@ INCLUDE_DIRS
 
     "dispatcher/include"
 )
+target_compile_options(${COMPONENT_LIB} PRIVATE -std=gnu++20)

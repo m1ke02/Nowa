@@ -1,5 +1,3 @@
-#pragma once
-
 #include "Dispatcher.h"
 #include "DispatcherUtils.h"
 #include "esp_log.h"
@@ -40,7 +38,7 @@ esp_err_t Dispatcher::initDriver() {
 static void disp_connect(void *ctx, uint8_t idx, uint8_t bda[6]) {
     Dispatcher *disp = static_cast<Dispatcher *>(ctx);
     disp->m_attrRequestInProgress[idx] = false;
-    //disp->connectNP(idx, bda);
+    disp->connectNP(idx, { bda[0], bda[1], bda[2], bda[3], bda[4], bda[5] });
     ESP_LOGI(TAG, "Connected as [%d]", idx);
     DispatcherUtils::printBDA(bda);
 }
@@ -48,13 +46,13 @@ static void disp_connect(void *ctx, uint8_t idx, uint8_t bda[6]) {
 static void disp_disconnect(void *ctx, uint8_t idx) {
     Dispatcher *disp = static_cast<Dispatcher *>(ctx);
     disp->m_attrRequestInProgress[idx] = false;
-    //disp->disconnectNP(idx, false);
+    disp->disconnectNP(idx, false);
     ESP_LOGI(TAG, "Disconnected [%d]", idx);
 }
 
 static void disp_device_name(void *ctx, uint8_t idx, char *name) {
     Dispatcher *disp = static_cast<Dispatcher *>(ctx);
-    //disp->getNPById(idx)->setName(name);
+    disp->getNPById(idx)->setName(name);
     ESP_LOGI(TAG, "Device Name [%d]: %s", idx, name);
 }
 

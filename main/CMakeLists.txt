@@ -6,7 +6,6 @@ SRCS
     "protocol_examples_utils.c"
     "wifi_connect.c"
     "emci_profile.c"
-    "dispatcher.cpp"
 
     "../Emci/src/emci_arg.c"
     "../Emci/src/emci_parser.c"
@@ -16,9 +15,16 @@ SRCS
     "ble_ancs/ble_ancs.c"
     "ble_ancs/ble_utils.c"
 
+    "dispatcher/Dispatcher.cpp"
+    "dispatcher/DispatcherDriverInterface.cpp"
+    "dispatcher/DispatcherUtils.cpp"
+    "dispatcher/NotificationProvider.cpp"
+
 INCLUDE_DIRS
     "include"
     "../Emci/include"
 
     "ble_ancs/include"
+
+    "dispatcher/include"
 )

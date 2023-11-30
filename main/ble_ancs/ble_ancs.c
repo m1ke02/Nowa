@@ -42,6 +42,7 @@ static uint8_t adv_config_done = 0;
 
 // Driver API
 static ancs_handlers_t handlers;
+static void *context;
 
 // ANCS UUID: 7905F431-B5CE-4E99-A40F-4B1E122D00D0
 // In its basic form, the ANCS exposes three characteristics:
@@ -492,7 +493,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             memcpy(gl_profile_tab[idx].device_name, param->read.value, len);
             gl_profile_tab[idx].device_name[len] = '\0';
 
-            if (handlers.device_name) handlers.device_name(idx, (char *)gl_profile_tab[idx].device_name);
+            if (handlers.device_name) handlers.device_name(context, idx, (char *)gl_profile_tab[idx].device_name);
 
         } else if (param->read.handle == gl_profile_tab[idx].gap.appearance_elem.char_handle) {
             // Store device appearance
@@ -552,7 +553,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
                 gl_profile_tab[idx].ble_ancs_inst.parse_info.parse_state == BLE_ANCS_ATTR_DONE) {
                 ESP_LOGD(TAG, "All attrs processed, uid=%" PRIu32, gl_profile_tab[idx].ble_ancs_inst.evt.notif_uid);
 
-                if (handlers.attributes_done) handlers.attributes_done(idx, gl_profile_tab[idx].ble_ancs_inst.evt.notif_uid);
+                if (handlers.attributes_done) handlers.attributes_done(context, idx, gl_profile_tab[idx].ble_ancs_inst.evt.notif_uid);
             } else {
                 ESP_LOGD(TAG, "Ignoring");
             }
@@ -591,7 +592,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             break;
         }
 
-        if (handlers.disconnect) handlers.disconnect(idx);
+        if (handlers.disconnect) handlers.disconnect(context, idx);
 
         ESP_LOGV(TAG, "Disconnecting this profile");
         gl_profile_tab[idx].anc.service_found = false;
@@ -636,7 +637,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
 
         // esp_timer_start_periodic(gl_profile_tab[idx].timer, 100000ULL);
 
-        if (handlers.connect) handlers.connect(idx, param->connect.remote_bda);
+        if (handlers.connect) handlers.connect(context, idx, param->connect.remote_bda);
 
         // create gattc virtual connection
         esp_ble_gattc_open(gl_profile_tab[idx].gattc_if, gl_profile_tab[idx].remote_bda, BLE_ADDR_TYPE_RANDOM, true);
@@ -732,11 +733,11 @@ static void ancs_c_evt_handler(ble_ancs_c_evt_t * p_evt, void *ctx)
     switch (p_evt->evt_type)
     {
         case BLE_ANCS_C_EVT_NOTIF:
-            if (handlers.notification) handlers.notification(idx, &p_evt->notif);
+            if (handlers.notification) handlers.notification(context, idx, &p_evt->notif);
             break;
 
         case BLE_ANCS_C_EVT_NOTIF_ATTRIBUTE:
-            if (handlers.attribute) handlers.attribute(idx, p_evt->notif_uid, &p_evt->attr);
+            if (handlers.attribute) handlers.attribute(context, idx, p_evt->notif_uid, &p_evt->attr);
             break;
 
         default:
@@ -778,7 +779,7 @@ static esp_err_t ancs_profile_init(int idx) {
     return ESP_OK;
 }
 
-esp_err_t ancs_init(ancs_handlers_t *h)
+esp_err_t ancs_init(void *ctx, ancs_handlers_t *h)
 {
     esp_err_t ret;
 
@@ -788,6 +789,7 @@ esp_err_t ancs_init(ancs_handlers_t *h)
     }
 
     handlers = *h;
+    context = ctx;
 
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
 

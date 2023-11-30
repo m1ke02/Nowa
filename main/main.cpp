@@ -12,9 +12,11 @@
 
 #include "lwip/sockets.h"
 
-#include "dispatcher.h"
+#include "Dispatcher.h"
 
 #define TAG "MAIN"
+
+Dispatcher disp;
 
 extern "C" void app_main(void)
 {
@@ -34,7 +36,7 @@ extern "C" void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    ESP_ERROR_CHECK(disp_init());
+    ESP_ERROR_CHECK(disp.initDriver());
 
     //ESP_ERROR_CHECK(esp_netif_init());
 

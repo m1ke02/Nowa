@@ -11,12 +11,15 @@ class Dispatcher {
 
 public:
     Dispatcher() = default;
-    esp_err_t initDriver();
+    esp_err_t initDriver(void);
     bool connectNP(uint8_t idx, const BDA& bda);
     bool disconnectNP(uint8_t idx, bool deleteAfter = false);
-    bool isConnected(uint8_t idx);
+    uint8_t getId(const BDA& bda);
     NotificationProvider *getNPById(uint8_t idx);
     NotificationProvider *getNPByBDA(const BDA& bda);
+    const std::map<BDA, NotificationProvider>& providers() { return m_providerList; }
+
+    static constexpr uint8_t INVALID_ID = (uint8_t)(-1);
 
     std::array<std::queue<AttrRequest>, ANCS_PROFILE_NUM> m_attrRequestQueue;
     std::array<bool, ANCS_PROFILE_NUM> m_attrRequestInProgress;

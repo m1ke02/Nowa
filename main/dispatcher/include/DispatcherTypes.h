@@ -14,5 +14,6 @@ struct Notification {
 	String timeStamp;
 	String appId;
 	String title;
+    String subTitle;
 	String message;
 };

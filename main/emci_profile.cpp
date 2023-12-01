@@ -1,11 +1,10 @@
-#include "emci_profile.h"
-#include "emci_std_handlers.h"
 #include <stdio.h>
 #include <inttypes.h>
 
-#include "ble_ancs.h"
-
-// char emci_tx_buffer[EMCI_TX_BUFFER_SIZE];
+#include "emci_profile.h"
+#include "emci_std_handlers.h"
+#include "Dispatcher.h"
+#include "DispatcherUtils.h"
 
 const emci_command_t cmd_array[] =
 {
@@ -40,9 +39,11 @@ const emci_command_t cmd_array[] =
 
 const uint_fast8_t cmd_array_length = (sizeof(cmd_array) / sizeof(emci_command_t));
 
+extern Dispatcher disp;
+
 void emci_prompt(emci_env_t *env)
 {
-    EMCI_PRINTF("Nowa>");
+    EMCI_PRINTF("N>");
 }
 
 emci_status_t about_handler(uint8_t argc, emci_arg_t *argv, emci_env_t *env)
@@ -53,7 +54,33 @@ emci_status_t about_handler(uint8_t argc, emci_arg_t *argv, emci_env_t *env)
 
 emci_status_t device_list_handler(uint8_t argc, emci_arg_t *argv, emci_env_t *env)
 {
-    ancs_dump_device_list ((FILE *)env->extra, EMCI_ENDL);
+    FILE *f = (FILE *)env->extra;
+
+    int i = 0;
+    for (auto p : disp.providers()) {
+        BDA bda = p.first;
+        String name = p.second.name();
+        size_t notifs = p.second.notifications().size();
+        uint8_t id = disp.getId(bda);
+        if (id != Dispatcher::INVALID_ID) {
+            fprintf(f, "[%02d] ", id);
+        } else {
+            fprintf(f, "[--] ");
+        }
+        DispatcherUtils::printBDA(f, bda);
+        fprintf(f, " '%s' %d Ntf ", p.second.name().c_str(), notifs);
+        Notification *latest = p.second.getLatestNotification();
+        if (latest) {
+            fprintf(f, "Latest %s", latest->timeStamp.c_str());
+        }
+        fprintf(f, EMCI_ENDL);
+        i ++;
+    }
+
+    if (i == 0) {
+        fprintf(f, "<No devices>" EMCI_ENDL);
+    }
+
     return EMCI_STATUS_OK;
 }
 

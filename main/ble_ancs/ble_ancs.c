@@ -934,27 +934,3 @@ esp_err_t ancs_deinit(void *ctx) {
 bool ancs_is_initialized(void) {
     return ble_already_init;
 }
-
-void ancs_dump_device_list(FILE *stream, const char *endl) {
-    bool empty = true;
-    for (int idx = 0; idx < ANCS_PROFILE_NUM; idx ++) {
-        if (memcmp(gl_profile_tab[idx].remote_bda, "\x00\x00\x00\x00\x00\x00", 6) != 0) {
-            empty = false;
-            fprintf(stream, "[%i] %04x %s @ %02x:%02x:%02x:%02x:%02x:%02x%s",
-                idx+1,
-                gl_profile_tab[idx].appearance,
-                gl_profile_tab[idx].device_name,
-                gl_profile_tab[idx].remote_bda[0],
-                gl_profile_tab[idx].remote_bda[1],
-                gl_profile_tab[idx].remote_bda[2],
-                gl_profile_tab[idx].remote_bda[3],
-                gl_profile_tab[idx].remote_bda[4],
-                gl_profile_tab[idx].remote_bda[5],
-                endl
-            );
-        }
-    }
-    if (empty) {
-        fprintf(stream, "<No devices>%s", endl);
-    }
-}

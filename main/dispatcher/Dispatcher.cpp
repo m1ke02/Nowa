@@ -3,16 +3,23 @@
 
 #define TAG "DISP"
 
+static const BDA m_zeroBDA { 0, 0, 0, 0, 0, 0 };
+
 bool Dispatcher::connectNP(uint8_t idx, const BDA& bda) {
 	if (idx >= m_activeBDAs.size()) {
-		ESP_LOGD(TAG, "Invalid index");
+		ESP_LOGE(TAG, "Invalid index");
 		return false;
 	}
 
-	if (isConnected(idx)) {
-		ESP_LOGD(TAG, "Index already occupied");
+	if (m_activeBDAs[idx] != m_zeroBDA) {
+		ESP_LOGE(TAG, "Index already occupied");
 		return false;
 	}
+
+    if (getId(bda) != Dispatcher::INVALID_ID) {
+        ESP_LOGE(TAG, "Already connected");
+		return false;
+    }
 
 	if (m_providerList.count(bda) != 0) {
 		m_providerList[bda].setIsActive(true);
@@ -29,12 +36,12 @@ bool Dispatcher::connectNP(uint8_t idx, const BDA& bda) {
 
 bool Dispatcher::disconnectNP(uint8_t idx, bool deleteAfter) {
 	if (idx >= m_activeBDAs.size()) {
-		ESP_LOGD(TAG, "Invalid index");
+		ESP_LOGE(TAG, "Invalid index");
 		return false;
 	}
 
 	if (m_providerList.count(m_activeBDAs[idx]) == 0) {
-		ESP_LOGD(TAG, "Not yet connected");
+		ESP_LOGE(TAG, "Not yet connected");
 		return false;
 	}
 
@@ -48,30 +55,25 @@ bool Dispatcher::disconnectNP(uint8_t idx, bool deleteAfter) {
 	return true;
 }
 
-bool Dispatcher::isConnected(uint8_t idx)
+uint8_t Dispatcher::getId(const BDA& bda)
 {
-	if (idx >= m_activeBDAs.size()) {
-		ESP_LOGD(TAG, "Invalid index");
-		return false;
-	}
-
-	for (size_t i = 0; i < m_activeBDAs[idx].size(); i ++) {
-		if (m_activeBDAs[idx][i] != 0) {
-			return true;
+	for (size_t i = 0; i < m_activeBDAs.size(); i ++) {
+		if (m_activeBDAs[i] == bda) {
+			return (uint8_t)i;
 		}
 	}
 
-	return false;
+	return INVALID_ID;
 }
 
 NotificationProvider *Dispatcher::getNPById(uint8_t idx) {
 	if (idx >= m_activeBDAs.size()) {
-		ESP_LOGD(TAG, "Invalid index");
+		ESP_LOGE(TAG, "Invalid index");
 		return nullptr;
 	}
 
 	if (m_providerList.count(m_activeBDAs[idx]) == 0) {
-		ESP_LOGD(TAG, "NP not connected yet");
+		ESP_LOGE(TAG, "NP not connected yet");
 		return nullptr;
 	}
 
@@ -81,7 +83,7 @@ NotificationProvider *Dispatcher::getNPById(uint8_t idx) {
 NotificationProvider *Dispatcher::getNPByBDA(const BDA& bda)
 {
 	if (m_providerList.count(bda) == 0) {
-		ESP_LOGD(TAG, "NP not present");
+		ESP_LOGE(TAG, "NP not present");
 		return nullptr;
 	}
 

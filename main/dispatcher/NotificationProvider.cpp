@@ -3,7 +3,7 @@
 
 #define TAG "DISP"
 
-bool NotificationProvider::addNotification(Notification &notif) {
+bool NotificationProvider::addNotification(const Notification &notif) {
 	if (!m_isActive) {
 		ESP_LOGD(TAG, "Device not active");
 		return false;
@@ -17,4 +17,4 @@ bool NotificationProvider::addNotification(Notification &notif) {
 
 	m_notifQueue.push(notif);
 	return true;
-};
+}

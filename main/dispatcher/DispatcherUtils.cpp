@@ -83,8 +83,8 @@ void DispatcherUtils::printNotif(ble_ancs_c_evt_notif_t *p_notif)
     }
 }
 
-void DispatcherUtils::printBDA(FILE *stream, BDA bda) {
-    fprintf(stream, "%02x:%02x:%02x:%02x:%02x:%02x", bda[0], bda[1], bda[2], bda[3], bda[4], bda[5]);
+int DispatcherUtils::printBDA(FILE *stream, BDA bda) {
+    return fprintf(stream, "%02x:%02x:%02x:%02x:%02x:%02x", bda[0], bda[1], bda[2], bda[3], bda[4], bda[5]);
 }
 
 /**@brief Function for printing iOS notification attribute data.

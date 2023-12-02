@@ -13,14 +13,17 @@ static void disp_attributes_done(void *ctx, uint8_t idx, uint32_t uid);
 
 static const std::vector<ble_ancs_c_notif_attr_id_val_t> basicAttrList {
     BLE_ANCS_NOTIF_ATTR_ID_APP_IDENTIFIER,
-    BLE_ANCS_NOTIF_ATTR_ID_DATE
-};
-
-static const std::vector<ble_ancs_c_notif_attr_id_val_t> auxAttrList {
+    BLE_ANCS_NOTIF_ATTR_ID_DATE,
     BLE_ANCS_NOTIF_ATTR_ID_TITLE,
     BLE_ANCS_NOTIF_ATTR_ID_SUBTITLE,
     BLE_ANCS_NOTIF_ATTR_ID_MESSAGE
 };
+
+/*static const std::vector<ble_ancs_c_notif_attr_id_val_t> auxAttrList {
+    BLE_ANCS_NOTIF_ATTR_ID_TITLE,
+    BLE_ANCS_NOTIF_ATTR_ID_SUBTITLE,
+    BLE_ANCS_NOTIF_ATTR_ID_MESSAGE
+};*/
 
 esp_err_t Dispatcher::initDriver(void) {
     ancs_handlers_t h;
@@ -37,14 +40,14 @@ esp_err_t Dispatcher::initDriver(void) {
 
 static void disp_connect(void *ctx, uint8_t idx, uint8_t bda[6]) {
     Dispatcher *disp = static_cast<Dispatcher *>(ctx);
-    disp->m_attrRequestInProgress[idx] = false;
     disp->connectNP(idx, { bda[0], bda[1], bda[2], bda[3], bda[4], bda[5] });
     ESP_LOGI(TAG, "Connected as [%d]", idx);
+    Notification *n = disp->getNPById(idx)->getLatestNotification();
+    disp->m_prevLatestNotifications[idx] = n ? n->timeStamp : String();
 }
 
 static void disp_disconnect(void *ctx, uint8_t idx) {
     Dispatcher *disp = static_cast<Dispatcher *>(ctx);
-    disp->m_attrRequestInProgress[idx] = false;
     disp->disconnectNP(idx, false);
     ESP_LOGI(TAG, "Disconnected [%d]", idx);
 }
@@ -59,17 +62,14 @@ static void disp_notification(void *ctx, uint8_t idx, ble_ancs_c_evt_notif_t *no
     Dispatcher *disp = static_cast<Dispatcher *>(ctx);
     if (notif->evt_id == BLE_ANCS_EVENT_ID_NOTIFICATION_ADDED || notif->evt_id == BLE_ANCS_EVENT_ID_NOTIFICATION_MODIFIED) {
         DispatcherUtils::printNotif(notif);
-        disp->m_notifBuffers[idx] = Notification();
 
-        if (!disp->m_attrRequestInProgress[idx]) {
+        bool empty = disp->m_attrRequestQueue[idx].empty();
+        disp->m_attrRequestQueue[idx].push(std::make_pair(notif->notif_uid, basicAttrList));
+        if (empty) {
             // Start read process if this is the first request
-            ESP_LOGI(TAG, "Starting immediately for UID %" PRIu32, notif->notif_uid);
-            ancs_send_attrs_request(idx, notif->notif_uid, basicAttrList.data(), basicAttrList.size());
-            disp->m_attrRequestInProgress[idx] = true;
-        } else {
-            // Add to queue if consecutive
-            ESP_LOGI(TAG, "Adding to queue for UID %" PRIu32, notif->notif_uid);
-            disp->m_attrRequestQueue[idx].push(std::make_pair(notif->notif_uid, basicAttrList));
+            AttrRequest r = disp->m_attrRequestQueue[idx].front();
+            ESP_LOGI(TAG, "Starting immediately for UID %" PRIu32, r.first);
+            ancs_send_attrs_request(idx, r.first, r.second.data(), r.second.size());
         }
     }
 }
@@ -77,6 +77,12 @@ static void disp_notification(void *ctx, uint8_t idx, ble_ancs_c_evt_notif_t *no
 static void disp_attribute(void *ctx, uint8_t idx, uint32_t uid, ble_ancs_c_attr_t *attr) {
     Dispatcher *disp = static_cast<Dispatcher *>(ctx);
     DispatcherUtils::printNotifAttr(uid, attr);
+
+    // Clean on first attribute
+    AttrRequest r = disp->m_attrRequestQueue[idx].front();
+    if (attr->attr_id == r.second[0]) {
+        disp->m_notifBuffers[idx] = Notification();
+    }
 
     switch (attr->attr_id) {
         case BLE_ANCS_NOTIF_ATTR_ID_APP_IDENTIFIER: disp->m_notifBuffers[idx].appId = (char *)attr->p_attr_data; break;
@@ -86,25 +92,36 @@ static void disp_attribute(void *ctx, uint8_t idx, uint32_t uid, ble_ancs_c_attr
         case BLE_ANCS_NOTIF_ATTR_ID_DATE: disp->m_notifBuffers[idx].timeStamp = (char *)attr->p_attr_data; break;
         default: break;
     }
-
-    if (attr->attr_id == BLE_ANCS_NOTIF_ATTR_ID_APP_IDENTIFIER &&
-        strcmp((char *)(attr->p_attr_data), "com.apple.shortcuts") == 0) {
-        ESP_LOGI(TAG, "Requesting remaining attrs for UID %" PRIu32, uid);
-        disp->m_attrRequestQueue[idx].push(std::make_pair(uid, auxAttrList));
-    }
 }
 
 static void disp_attributes_done(void *ctx, uint8_t idx, uint32_t uid) {
     Dispatcher *disp = static_cast<Dispatcher *>(ctx);
 
+    if (disp->m_attrRequestQueue[idx].empty()) {
+        return; // Invalid state
+    }
+
+    disp->m_attrRequestQueue[idx].pop();
+
+    // Notification filtering
+    if (disp->m_notifBuffers[idx].appId.compare("com.apple.shortcuts") == 0) {
+        // Add notification to the queue
+        if (disp->m_notifBuffers[idx].timeStamp.compare(disp->m_prevLatestNotifications[idx]) > 0) {
+            disp->getNPById(idx)->addNotification(disp->m_notifBuffers[idx]);
+            ESP_LOGD(TAG, "Added!");
+            // Request the other attributes
+            //ESP_LOGI(TAG, "Requesting remaining attrs for UID %" PRIu32, uid);
+            //disp->m_attrRequestQueue[idx].push(std::make_pair(uid, auxAttrList));
+        } else {
+            ESP_LOGD(TAG, "Oudated UID %" PRIu32, uid);
+        }
+    }
+
     if (!disp->m_attrRequestQueue[idx].empty()) {
         AttrRequest r = disp->m_attrRequestQueue[idx].front();
-        disp->m_attrRequestQueue[idx].pop();
         ESP_LOGI(TAG, "Performing queued request for UID %" PRIu32, r.first);
         ancs_send_attrs_request(idx, r.first, r.second.data(), r.second.size());
     } else {
-        ESP_LOGI(TAG, "Finished!");
-        disp->getNPById(idx)->addNotification(disp->m_notifBuffers[idx]);
-        disp->m_attrRequestInProgress[idx] = false;
+        ESP_LOGI(TAG, "Finished UID %" PRIu32, uid);
     }
 }

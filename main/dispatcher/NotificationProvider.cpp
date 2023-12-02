@@ -9,12 +9,6 @@ bool NotificationProvider::addNotification(const Notification &notif) {
 		return false;
 	}
 
-	Notification *latest = getLatestNotification();
-	if (latest != nullptr && notif.timeStamp.compare(latest->timeStamp) <= 0) {
-		ESP_LOGD(TAG, "Notification outdated");
-		return false;
-	}
-
-	m_notifQueue.push(notif);
+	m_notifQueue.push_back(notif);
 	return true;
 }

@@ -17,13 +17,13 @@ public:
     uint8_t getId(const BDA& bda);
     NotificationProvider *getNPById(uint8_t idx);
     NotificationProvider *getNPByBDA(const BDA& bda);
-    const std::map<BDA, NotificationProvider>& providers() { return m_providerList; }
+    std::map<BDA, NotificationProvider>& providers() { return m_providerList; }
 
     static constexpr uint8_t INVALID_ID = (uint8_t)(-1);
 
     std::array<std::queue<AttrRequest>, ANCS_PROFILE_NUM> m_attrRequestQueue;
-    std::array<bool, ANCS_PROFILE_NUM> m_attrRequestInProgress;
     std::array<Notification, ANCS_PROFILE_NUM> m_notifBuffers;
+    std::array<String, ANCS_PROFILE_NUM> m_prevLatestNotifications;
 
 private:
     std::array<BDA, ANCS_PROFILE_NUM> m_activeBDAs;

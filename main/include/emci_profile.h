@@ -21,6 +21,7 @@ void emci_prompt(emci_env_t *env);
 emci_status_t about_handler(uint8_t argc, emci_arg_t *argv, emci_env_t *env);
 emci_status_t device_list_handler(uint8_t argc, emci_arg_t *argv, emci_env_t *env);
 emci_status_t notification_list_handler(uint8_t argc, emci_arg_t *argv, emci_env_t *env);
+emci_status_t reset_handler(uint8_t argc, emci_arg_t *argv, emci_env_t *env);
 const char *emci_app_status_message(emci_status_t status);
 
 #ifdef __cplusplus

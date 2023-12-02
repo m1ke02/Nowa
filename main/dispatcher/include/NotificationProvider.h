@@ -1,6 +1,6 @@
 #pragma once
 
-#include <queue>
+#include <deque>
 
 #include "DispatcherTypes.h"
 
@@ -15,11 +15,11 @@ public:
 	void setName(String name) { m_name = name; }
 	bool addNotification(const Notification &notif);
 	Notification *getLatestNotification(void) { return m_notifQueue.empty() ? nullptr : &m_notifQueue.back(); }
-    const std::queue<Notification>& notifications(void) { return m_notifQueue; }
+    const std::deque<Notification>& notifications(void) const { return m_notifQueue; }
 
 private:
 	bool m_isActive;
 	String m_name;
 	BDA m_bda;
-	std::queue<Notification> m_notifQueue;
+	std::deque<Notification> m_notifQueue;
 };

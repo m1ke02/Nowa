@@ -11,9 +11,9 @@ using String = std::string;
 using AttrRequest = std::pair<uint32_t, std::vector<ble_ancs_c_notif_attr_id_val_t>>;
 
 struct Notification {
-	String timeStamp;
-	String appId;
-	String title;
+    String timeStamp;
+    String appId;
+    String title;
     String subTitle;
-	String message;
+    String message;
 };

@@ -42,7 +42,10 @@ static server_context_t context;
 static ws_user_context_t log_ws_ctx;
 static ws_user_context_t console_ws_ctx;
 
+static bool mcu_restart_request = false;
+
 static esp_err_t system_info_get_handler(httpd_req_t *req);
+static esp_err_t mcu_restart_handler(httpd_req_t *req);
 static esp_err_t rest_common_get_handler(httpd_req_t *req);
 static esp_err_t console_ws_receive_handler(httpd_req_t *req, httpd_ws_frame_t *pkt);
 
@@ -52,6 +55,7 @@ static esp_err_t ws_handler(httpd_req_t *req);
 
 static void client_disconnect_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 static void client_connect_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
+static void request_complete_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 
 esp_err_t web_init() {
     config.uri_match_fn = httpd_uri_match_wildcard;
@@ -113,6 +117,19 @@ esp_err_t web_start(const char *base_path)
         return ret;
     }
 
+    /* URI handler for MCU restart */
+    httpd_uri_t mcu_restart_uri = {
+        .uri = "/api/mcu_restart",
+        .method = HTTP_GET,
+        .handler = mcu_restart_handler,
+        .user_ctx = &context
+    };
+    ret = httpd_register_uri_handler(server, &mcu_restart_uri);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Cannot register URI handler");
+        return ret;
+    }
+
     /* URI handler for /log websocket */
     httpd_uri_t log_ws_uri = {
         .uri        = "/log",
@@ -158,6 +175,7 @@ esp_err_t web_start(const char *base_path)
 
     esp_event_handler_register(ESP_HTTP_SERVER_EVENT, HTTP_SERVER_EVENT_ON_CONNECTED, client_connect_handler, NULL);
     esp_event_handler_register(ESP_HTTP_SERVER_EVENT, HTTP_SERVER_EVENT_DISCONNECTED, client_disconnect_handler, NULL);
+    esp_event_handler_register(ESP_HTTP_SERVER_EVENT, HTTP_SERVER_EVENT_SENT_DATA, request_complete_handler, NULL);
 
     return ESP_OK;
 }
@@ -237,6 +255,15 @@ static void client_connect_handler(void* arg, esp_event_base_t event_base,
     ESP_LOGI(TAG, "client_connect: FD=%d", *fd);
 }
 
+static void request_complete_handler(void* arg, esp_event_base_t event_base,
+    int32_t event_id, void* event_data)
+{
+    //esp_http_server_event_data *data = (esp_http_server_event_data *)event_data;
+    if (mcu_restart_request) {
+        esp_restart();
+    }
+}
+
 /* Simple handler for getting system handler */
 static esp_err_t system_info_get_handler(httpd_req_t *req)
 {
@@ -272,6 +299,13 @@ static esp_err_t system_info_get_handler(httpd_req_t *req)
     httpd_resp_sendstr(req, sys_info);
     free((void *)sys_info);
     cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t mcu_restart_handler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_sendstr(req, "Request accepted");
+    mcu_restart_request = true;
     return ESP_OK;
 }
 
@@ -440,11 +474,6 @@ static esp_err_t ws_handler(httpd_req_t *req)
             ret = user_ctx->receive_handler(req, &ws_pkt);
         }
     }
-    /*if (ws_pkt.type == HTTPD_WS_TYPE_TEXT &&
-        strcmp((char*)ws_pkt.payload,"Trigger async") == 0) {
-        free(buf);
-        return trigger_async_send(req->handle, req);
-    }*/
 
     free(buf);
     return ret;

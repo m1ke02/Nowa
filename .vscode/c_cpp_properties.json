@@ -3,6 +3,7 @@
         {
             "name": "Win32",
             "includePath": [
+                "C:/Programs/GNU_MCU_Eclipse/esp-idf/5.5.1/components/**",
                 "${workspaceFolder}/**"
             ],
             "defines": [
@@ -10,7 +11,7 @@
                 "UNICODE",
                 "_UNICODE"
             ],
-            "compilerPath": "C:\\Users\\Misha\\.espressif\\tools\\xtensa-esp32-elf\\esp-2022r1-11.2.0\\xtensa-esp32-elf\\bin\\xtensa-esp32-elf-gcc.exe",
+            "compilerPath": "C:\\Users\\Misha\\.espressif\\tools\\xtensa-esp-elf\\esp-14.2.0_20241119\\xtensa-esp-elf\\bin\\xtensa-esp32-elf-gcc.exe",
             "cStandard": "c11",
             "cppStandard": "gnu++14",
             "intelliSenseMode": "windows-gcc-x86",

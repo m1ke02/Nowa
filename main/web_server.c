@@ -3,6 +3,8 @@
 #include <fcntl.h>
 #include "esp_http_server.h"
 #include "esp_chip_info.h"
+#include "esp_app_desc.h"
+#include "esp_mac.h"
 #include "esp_random.h"
 #include "esp_log.h"
 #include "esp_vfs.h"
@@ -240,10 +242,32 @@ static esp_err_t system_info_get_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
     cJSON *root = cJSON_CreateObject();
+    char buf[24];
+
     esp_chip_info_t chip_info;
     esp_chip_info(&chip_info);
-    cJSON_AddStringToObject(root, "version", IDF_VER);
-    cJSON_AddNumberToObject(root, "cores", chip_info.cores);
+    cJSON_AddNumberToObject(root, "chip_model", chip_info.model);
+    cJSON_AddNumberToObject(root, "chip_revision", chip_info.revision);
+    snprintf(buf, sizeof(buf), "0x%02X", (uint8_t)chip_info.features);
+    cJSON_AddStringToObject(root, "chip_features", buf);
+
+    const esp_app_desc_t *app_desc = esp_app_get_description();
+    cJSON_AddStringToObject(root, "idf_version", app_desc->idf_ver);
+    cJSON_AddStringToObject(root, "app_version", app_desc->version);
+    cJSON_AddStringToObject(root, "build_date", app_desc->date);
+    cJSON_AddStringToObject(root, "build_time", app_desc->time);
+
+    esp_reset_reason_t rr = esp_reset_reason();
+    cJSON_AddNumberToObject(root, "reset_reason", rr);
+
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    cJSON_AddStringToObject(root, "mac_wifi", buf);
+    esp_read_mac(mac, ESP_MAC_BT);
+    snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    cJSON_AddStringToObject(root, "mac_bt", buf);
+
     const char *sys_info = cJSON_Print(root);
     httpd_resp_sendstr(req, sys_info);
     free((void *)sys_info);

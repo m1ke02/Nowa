@@ -1,13 +1,16 @@
 #include "web_server.h"
 #include <string.h>
 #include <fcntl.h>
+#include <sys/stat.h>
+#include "esp_log.h"
+#include "esp_vfs.h"
 #include "esp_http_server.h"
 #include "esp_chip_info.h"
 #include "esp_app_desc.h"
 #include "esp_mac.h"
-#include "esp_random.h"
-#include "esp_log.h"
-#include "esp_vfs.h"
+#include "esp_ota_ops.h"
+#include "esp_flash_partitions.h"
+#include "esp_partition.h"
 #include "cJSON.h"
 
 static const char *TAG = "web";
@@ -17,6 +20,10 @@ static const char *TAG = "web";
 #define MAX_OPEN_SOCKETS    7 // Must be in sync with HTTPD_DEFAULT_CONFIG()
 
 #define CHECK_FILE_EXTENSION(filename, ext) (strcasecmp(&filename[strlen(filename) - strlen(ext)], ext) == 0)
+
+#ifndef MIN
+#define MIN(a, b)       (((a) < (b)) ? (a) : (b))
+#endif
 
 typedef struct server_context_tag {
     char base_path[ESP_VFS_PATH_MAX + 1];
@@ -46,6 +53,7 @@ static bool mcu_restart_request = false;
 
 static esp_err_t system_info_get_handler(httpd_req_t *req);
 static esp_err_t mcu_restart_handler(httpd_req_t *req);
+static esp_err_t ota_post_handler(httpd_req_t *req);
 static esp_err_t rest_common_get_handler(httpd_req_t *req);
 static esp_err_t console_ws_receive_handler(httpd_req_t *req, httpd_ws_frame_t *pkt);
 
@@ -55,7 +63,6 @@ static esp_err_t ws_handler(httpd_req_t *req);
 
 static void client_disconnect_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 static void client_connect_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
-static void request_complete_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 
 esp_err_t web_init() {
     config.uri_match_fn = httpd_uri_match_wildcard;
@@ -130,6 +137,19 @@ esp_err_t web_start(const char *base_path)
         return ret;
     }
 
+    /* URI handler for /firmware_update */
+    httpd_uri_t firmware_update_uri = {
+        .uri = "/api/firmware_update",
+        .method = HTTP_POST,
+        .handler = ota_post_handler,
+        .user_ctx = &context
+    };
+    ret = httpd_register_uri_handler(server, &firmware_update_uri);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Cannot register URI handler");
+        return ret;
+    }
+
     /* URI handler for /log websocket */
     httpd_uri_t log_ws_uri = {
         .uri        = "/log",
@@ -175,7 +195,6 @@ esp_err_t web_start(const char *base_path)
 
     esp_event_handler_register(ESP_HTTP_SERVER_EVENT, HTTP_SERVER_EVENT_ON_CONNECTED, client_connect_handler, NULL);
     esp_event_handler_register(ESP_HTTP_SERVER_EVENT, HTTP_SERVER_EVENT_DISCONNECTED, client_disconnect_handler, NULL);
-    esp_event_handler_register(ESP_HTTP_SERVER_EVENT, HTTP_SERVER_EVENT_SENT_DATA, request_complete_handler, NULL);
 
     return ESP_OK;
 }
@@ -246,6 +265,9 @@ static void client_disconnect_handler(void* arg, esp_event_base_t event_base,
 {
     int *fd = (int *)event_data;
     ESP_LOGI(TAG, "client_disconnect: FD=%d", *fd);
+    if (mcu_restart_request) {
+        esp_restart();
+    }
 }
 
 static void client_connect_handler(void* arg, esp_event_base_t event_base,
@@ -253,15 +275,6 @@ static void client_connect_handler(void* arg, esp_event_base_t event_base,
 {
     int *fd = (int *)event_data;
     ESP_LOGI(TAG, "client_connect: FD=%d", *fd);
-}
-
-static void request_complete_handler(void* arg, esp_event_base_t event_base,
-    int32_t event_id, void* event_data)
-{
-    //esp_http_server_event_data *data = (esp_http_server_event_data *)event_data;
-    if (mcu_restart_request) {
-        esp_restart();
-    }
 }
 
 /* Simple handler for getting system handler */
@@ -303,9 +316,83 @@ static esp_err_t system_info_get_handler(httpd_req_t *req)
 }
 
 static esp_err_t mcu_restart_handler(httpd_req_t *req) {
-    httpd_resp_set_type(req, "text/plain");
-    httpd_resp_sendstr(req, "Request accepted");
+    ESP_LOGI(TAG, "Requesting MCU restart");
     mcu_restart_request = true;
+
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_hdr(req, "Connection", "close");
+    httpd_resp_sendstr(req, "MCU restart pending");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+static esp_err_t ota_post_handler(httpd_req_t *req)
+{
+    server_context_t *rest_context = (server_context_t *)req->user_ctx;
+    esp_err_t ret = ESP_OK;
+    int remaining = req->content_len;
+    esp_ota_handle_t update_handle = 0;
+    const esp_partition_t *update_prt = esp_ota_get_next_update_partition(NULL);
+    const esp_partition_t *running_prt = esp_ota_get_running_partition();
+
+    if (update_prt == NULL) {
+        ESP_LOGE(TAG, "esp_ota_get_next_update_partition failed");
+        httpd_resp_set_status(req, HTTPD_500);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Writing partition: type %d, subtype %d, offset 0x%08x", update_prt->type, update_prt->subtype, update_prt->address);
+    ESP_LOGI(TAG, "Running partition: type %d, subtype %d, offset 0x%08x", running_prt->type, running_prt->subtype, running_prt->address);
+
+    ret = esp_ota_begin(update_prt, OTA_WITH_SEQUENTIAL_WRITES, &update_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_begin failed with %d (%s)", ret, esp_err_to_name(ret));
+        httpd_resp_set_status(req, HTTPD_500);
+        return ESP_FAIL;
+    }
+
+    while (remaining > 0) {
+        // Read the data for the request
+        if ((ret = httpd_req_recv(req, rest_context->scratch, MIN(remaining, SCRATCH_BUFSIZE))) <= 0) {
+            ret = ESP_FAIL;
+            break;
+        }
+        size_t bytes_read = ret;
+        remaining -= bytes_read;
+        ESP_LOGI(TAG, "Received %d bytes, remaining %d", bytes_read, remaining);
+        ret = esp_ota_write(update_handle, rest_context->scratch, bytes_read);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "esp_ota_write failed with %d (%s)", ret, esp_err_to_name(ret));
+            break;
+        }
+    }
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Upload failed");
+        httpd_resp_set_status(req, HTTPD_500);
+        return ESP_FAIL;
+    }
+
+    ret = esp_ota_end(update_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_end failed with %d (%s)", ret, esp_err_to_name(ret));
+        httpd_resp_set_status(req, HTTPD_500);
+        return ESP_FAIL;
+    }
+
+    ret = esp_ota_set_boot_partition(update_prt);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_set_boot_partition failed with %d (%s)", ret, esp_err_to_name(ret));
+        httpd_resp_set_status(req, HTTPD_500);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Updated successfully, requesting MCU restart");
+    mcu_restart_request = true;
+
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_hdr(req, "Connection", "close");
+    httpd_resp_sendstr(req, "Updated successfully, MCU restart pending");
+    httpd_resp_send(req, NULL, 0);
     return ESP_OK;
 }
 
@@ -334,9 +421,10 @@ static esp_err_t rest_common_get_handler(httpd_req_t *req)
     } else {
         strlcat(filepath, req->uri, sizeof(filepath));
     }
+    ESP_LOGV(TAG, "Requested file %s", filepath);
     int fd = open(filepath, O_RDONLY, 0);
     if (fd == -1) {
-        ESP_LOGE(TAG, "Failed to open file : %s", filepath);
+        ESP_LOGE(TAG, "Failed to open file %s", filepath);
         /* Respond with 500 Internal Server Error */
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read existing file");
         return ESP_FAIL;
@@ -350,7 +438,7 @@ static esp_err_t rest_common_get_handler(httpd_req_t *req)
         /* Read file in chunks into the scratch buffer */
         read_bytes = read(fd, chunk, SCRATCH_BUFSIZE);
         if (read_bytes == -1) {
-            ESP_LOGE(TAG, "Failed to read file : %s", filepath);
+            ESP_LOGE(TAG, "Failed to read file %s", filepath);
         } else if (read_bytes > 0) {
             /* Send the buffer contents as HTTP response chunk */
             if (httpd_resp_send_chunk(req, chunk, read_bytes) != ESP_OK) {

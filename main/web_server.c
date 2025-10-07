@@ -337,7 +337,7 @@ static esp_err_t ota_post_handler(httpd_req_t *req)
 
     if (update_prt == NULL) {
         ESP_LOGE(TAG, "esp_ota_get_next_update_partition failed");
-        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
@@ -347,7 +347,7 @@ static esp_err_t ota_post_handler(httpd_req_t *req)
     ret = esp_ota_begin(update_prt, OTA_WITH_SEQUENTIAL_WRITES, &update_handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin failed with %d (%s)", ret, esp_err_to_name(ret));
-        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
@@ -368,21 +368,21 @@ static esp_err_t ota_post_handler(httpd_req_t *req)
     }
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Upload failed");
-        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
     ret = esp_ota_end(update_handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_end failed with %d (%s)", ret, esp_err_to_name(ret));
-        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
     ret = esp_ota_set_boot_partition(update_prt);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_set_boot_partition failed with %d (%s)", ret, esp_err_to_name(ret));
-        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
@@ -422,15 +422,27 @@ static esp_err_t rest_common_get_handler(httpd_req_t *req)
         strlcat(filepath, req->uri, sizeof(filepath));
     }
     ESP_LOGV(TAG, "Requested file %s", filepath);
+
+    set_content_type_from_file(req, filepath);
+
+    struct stat st;
+    if (stat(filepath, &st) == -1) {
+        // File not found, try to open compressed version
+        strlcat(filepath, ".gz", sizeof(filepath));
+        if (stat(filepath, &st) == -1) {
+            // Compressed not found either
+            httpd_resp_send_404(req);
+            return ESP_FAIL;
+        }
+        httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    }
+
     int fd = open(filepath, O_RDONLY, 0);
     if (fd == -1) {
         ESP_LOGE(TAG, "Failed to open file %s", filepath);
-        /* Respond with 500 Internal Server Error */
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read existing file");
+        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-
-    set_content_type_from_file(req, filepath);
 
     char *chunk = rest_context->scratch;
     ssize_t read_bytes;

@@ -7,7 +7,8 @@
     <input type="file" id="file_sel" style="display: none" onchange="on_file_selected()">
     <div>
         <button onclick="file_sel.click()">Select File...</button>
-        <button onclick="upload_file()">Upload</button>
+        <button onclick="upload_file('firmware_update')">Upload firmware</button>
+        <button onclick="upload_file('spiffs_update')">Upload SPIFFS</button>
         <div id="progress"></div>
         <div id="status"></div>
     </div>
@@ -16,12 +17,12 @@
             let file = document.getElementById("file_sel").files[0];
             document.getElementById("status").innerText = file ? `${file.name} (${file.size} B)` : "No file selected";
         }
-        function upload_file() {
+        function upload_file(target) {
             document.getElementById("progress").innerText = "0%";
             document.getElementById("status").innerText = "Upload in progress";
             let data = document.getElementById("file_sel").files[0];
             let xhr = new XMLHttpRequest();
-            xhr.open("post", "http://172.24.1.188/api/firmware_update", true);
+            xhr.open("post", `http://172.24.1.188/api/${target}`, true);
             //xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
             xhr.upload.addEventListener("progress", function (event) {
                 if (event.lengthComputable) {
@@ -32,7 +33,7 @@
             if(xhr.readyState === XMLHttpRequest.DONE) {
                 var status = xhr.status;
                 if (status >= 200 && status < 400) {
-                    document.getElementById("status").innerText = "Upload accepted. Device going to reboot";
+                    document.getElementById("status").innerText = "Upload accepted";
                 } else {
                     document.getElementById("status").innerText = "Upload failed!";
                 }

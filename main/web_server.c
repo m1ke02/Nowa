@@ -108,7 +108,7 @@ esp_err_t web_start(const char *base_path)
     ESP_LOGI(TAG, "Starting HTTP Server on port: '%d'", config.server_port);
     esp_err_t ret = httpd_start(&server, &config);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Start server failed");
+        ESP_LOGE(TAG, "httpd_start failed with %d (%s)", ret, esp_err_to_name(ret));
         return ret;
     }
 
@@ -121,7 +121,7 @@ esp_err_t web_start(const char *base_path)
     };
     ret = httpd_register_uri_handler(server, &system_info_get_uri);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Cannot register URI handler");
+        ESP_LOGE(TAG, "httpd_register_uri_handler failed with %d (%s)", ret, esp_err_to_name(ret));
         return ret;
     }
 
@@ -134,7 +134,7 @@ esp_err_t web_start(const char *base_path)
     };
     ret = httpd_register_uri_handler(server, &mcu_restart_uri);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Cannot register URI handler");
+        ESP_LOGE(TAG, "httpd_register_uri_handler failed with %d (%s)", ret, esp_err_to_name(ret));
         return ret;
     }
 
@@ -147,7 +147,7 @@ esp_err_t web_start(const char *base_path)
     };
     ret = httpd_register_uri_handler(server, &firmware_update_uri);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Cannot register URI handler");
+        ESP_LOGE(TAG, "httpd_register_uri_handler failed with %d (%s)", ret, esp_err_to_name(ret));
         return ret;
     }
 
@@ -160,7 +160,7 @@ esp_err_t web_start(const char *base_path)
     };
     ret = httpd_register_uri_handler(server, &spiffs_update_uri);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Cannot register URI handler");
+        ESP_LOGE(TAG, "httpd_register_uri_handler failed with %d (%s)", ret, esp_err_to_name(ret));
         return ret;
     }
 
@@ -175,7 +175,7 @@ esp_err_t web_start(const char *base_path)
     log_ws_ctx.open_fds_length = 0;
     ret = httpd_register_uri_handler(server, &log_ws_uri);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Cannot register URI handler");
+        ESP_LOGE(TAG, "httpd_register_uri_handler failed with %d (%s)", ret, esp_err_to_name(ret));
         return ret;
     }
 
@@ -190,7 +190,7 @@ esp_err_t web_start(const char *base_path)
     console_ws_ctx.open_fds_length = 0;
     ret = httpd_register_uri_handler(server, &console_ws_uri);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Cannot register URI handler");
+        ESP_LOGE(TAG, "httpd_register_uri_handler failed with %d (%s)", ret, esp_err_to_name(ret));
         return ret;
     }
 
@@ -203,12 +203,21 @@ esp_err_t web_start(const char *base_path)
     };
     ret = httpd_register_uri_handler(server, &common_get_uri);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Cannot register URI handler");
+        ESP_LOGE(TAG, "httpd_register_uri_handler failed with %d (%s)", ret, esp_err_to_name(ret));
         return ret;
     }
 
-    esp_event_handler_register(ESP_HTTP_SERVER_EVENT, HTTP_SERVER_EVENT_ON_CONNECTED, client_connect_handler, NULL);
-    esp_event_handler_register(ESP_HTTP_SERVER_EVENT, HTTP_SERVER_EVENT_DISCONNECTED, client_disconnect_handler, NULL);
+    ret = esp_event_handler_register(ESP_HTTP_SERVER_EVENT, HTTP_SERVER_EVENT_ON_CONNECTED, client_connect_handler, NULL);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "esp_event_handler_register failed with %d (%s)", ret, esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = esp_event_handler_register(ESP_HTTP_SERVER_EVENT, HTTP_SERVER_EVENT_DISCONNECTED, client_disconnect_handler, NULL);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "esp_event_handler_register failed with %d (%s)", ret, esp_err_to_name(ret));
+        return ret;
+    }
 
     return ESP_OK;
 }
@@ -216,18 +225,25 @@ esp_err_t web_start(const char *base_path)
 esp_err_t web_stop()
 {
     if (server == NULL) {
-        ESP_LOGE(TAG, "Server already stopped");
+        ESP_LOGW(TAG, "Server already stopped");
         return ESP_FAIL;
     }
 
     // Stop the httpd server
     esp_err_t ret = httpd_stop(server);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "httpd_stop failed with %d (%s)", ret, esp_err_to_name(ret));
+    }
     server = NULL;
 
     esp_event_handler_unregister(ESP_HTTP_SERVER_EVENT, HTTP_SERVER_EVENT_ON_CONNECTED, client_connect_handler);
     esp_event_handler_unregister(ESP_HTTP_SERVER_EVENT, HTTP_SERVER_EVENT_DISCONNECTED, client_disconnect_handler);
 
     return ret;
+}
+
+bool web_is_started() {
+    return (server != NULL);
 }
 
 /*

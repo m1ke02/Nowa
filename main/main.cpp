@@ -28,21 +28,26 @@ Dispatcher disp;
 static void disconnect_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data)
 {
-    ESP_LOGI(TAG, "disconnect_handler");
-    ESP_ERROR_CHECK(web_stop());
+    ESP_LOGV(TAG, "disconnect_handler");
+    if (web_is_started()) {
+        web_stop();
+    }
 }
 
 static void connect_handler(void* arg, esp_event_base_t event_base,
                             int32_t event_id, void* event_data)
 {
-    ESP_LOGI(TAG, "connect_handler");
-    ESP_ERROR_CHECK(web_start("/spiffs"));
+    ESP_LOGV(TAG, "connect_handler");
+    if (!web_is_started()) {
+        web_start("/spiffs");
+    }
 }
 
 extern "C" void app_main(void)
 {
     esp_err_t ret;
 
+    esp_log_level_set("MAIN", ESP_LOG_VERBOSE);
     esp_log_level_set("nvs", ESP_LOG_INFO);
     esp_log_level_set("ANCS", ESP_LOG_INFO);
     esp_log_level_set("BLEU", ESP_LOG_INFO);

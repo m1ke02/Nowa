@@ -66,9 +66,9 @@ static void example_handler_on_wifi_disconnect(void *arg, esp_event_base_t event
                                int32_t event_id, void *event_data)
 {
     s_retry_num++;
-    if (s_retry_num > CONFIG_EXAMPLE_WIFI_CONN_MAX_RETRY) {
+    /*if (s_retry_num > CONFIG_EXAMPLE_WIFI_CONN_MAX_RETRY) {
         ESP_LOGI(TAG, "WiFi Connect failed %d times, stop reconnect.", s_retry_num);
-        /* let example_wifi_sta_do_connect() return */
+        // let example_wifi_sta_do_connect() return
         if (s_semph_get_ip_addrs) {
             xSemaphoreGive(s_semph_get_ip_addrs);
         }
@@ -78,7 +78,7 @@ static void example_handler_on_wifi_disconnect(void *arg, esp_event_base_t event
         }
 #endif
         return;
-    }
+    }*/
     ESP_LOGI(TAG, "Wi-Fi disconnected, trying to reconnect...");
     esp_err_t err = esp_wifi_connect();
     if (err == ESP_ERR_WIFI_NOT_STARTED) {
@@ -204,9 +204,9 @@ esp_err_t example_wifi_sta_do_connect(wifi_config_t wifi_config, bool wait)
 #if CONFIG_EXAMPLE_CONNECT_IPV6
         xSemaphoreTake(s_semph_get_ip6_addrs, portMAX_DELAY);
 #endif
-        if (s_retry_num > CONFIG_EXAMPLE_WIFI_CONN_MAX_RETRY) {
+        /*if (s_retry_num > CONFIG_EXAMPLE_WIFI_CONN_MAX_RETRY) {
             return ESP_FAIL;
-        }
+        }*/
     }
     return ESP_OK;
 }

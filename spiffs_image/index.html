@@ -1,32 +1,11 @@
 <html>
-    <script>
-        let ws = undefined;
-        let i = 1;
-
-        function connect() {
-            if (!ws) {
-                ws = new WebSocket(`ws://${location.hostname || '172.24.1.188'}/console`);
-                ws.onopen = function (e) { console.log('Connected'); };
-                ws.onclose = function (e) { console.log('Disconnected'); };
-                ws.onmessage = function (e) { document.getElementById('receivedData').value = e.data; };
-            }
-        }
-
-        function disconnect() {
-            ws?.close();
-            ws = undefined;
-        }
-
-        function sendData(data) {
-            if (ws) {
-                ws.send(data);
-            }
-        }
-    </script>
     <body>
-        <button onclick="connect()">Connect</button>
-        <button onclick="disconnect()">Disconnect</button>
-        <button onclick="sendData(`Vot Govno ${i++}!`)">Send data</button>
-        Received: <input type="text" id="receivedData" />
+        <h1>Nowa</h1>
+        <p><a href="console.html">Console</a></p>
+        <p><a href="log.html">Log</a></p>
+        <p><a href="api/system_info">System Info</a></p>
+        <p><a href="update.html">Update firmware</a></p>
+        <p><a href="api/mcu_restart" target="frame">MCU restart</a></p>
+        <iframe src="" name="frame" style="display: none"></iframe>
     </body>
 </html>

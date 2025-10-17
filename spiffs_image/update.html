@@ -22,7 +22,7 @@
             document.getElementById("status").innerText = "Upload in progress";
             let data = document.getElementById("file_sel").files[0];
             let xhr = new XMLHttpRequest();
-            xhr.open("post", `http://${document.location.hostname}/api/${target}`, true);
+            xhr.open("post", `http://${location.hostname || '172.24.1.188'}/api/${target}`, true);
             //xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
             xhr.upload.addEventListener("progress", function (event) {
                 if (event.lengthComputable) {

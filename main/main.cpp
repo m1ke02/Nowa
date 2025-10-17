@@ -65,9 +65,9 @@ extern "C" void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    //ESP_ERROR_CHECK(disp.initDriver());
+    // ESP_ERROR_CHECK(disp.initDriver());
 
-    ESP_ERROR_CHECK(con_init());
+    // ESP_ERROR_CHECK(con_init());// TODO: Does not work
 
     ESP_ERROR_CHECK(spiffs_init());
 

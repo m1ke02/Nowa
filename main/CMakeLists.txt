@@ -8,6 +8,7 @@ SRCS
     "emci_profile.cpp"
     "uart_console.c"
     "web_server.c"
+    "web_server_profile.cpp"
     "netlog.c"
     "spiffs.c"
 

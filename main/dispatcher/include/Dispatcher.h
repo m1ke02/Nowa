@@ -12,6 +12,7 @@ class Dispatcher {
 public:
     Dispatcher() = default;
     esp_err_t initDriver(void);
+    esp_err_t deinitDriver(void);
     bool connectNP(uint8_t idx, const BDA& bda);
     bool disconnectNP(uint8_t idx, bool deleteAfter = false);
     uint8_t getId(const BDA& bda);

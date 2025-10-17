@@ -13,9 +13,17 @@
 #include "esp_flash_partitions.h"
 #include "esp_partition.h"
 #include "cJSON.h"
+#include "protocol_examples_utils.h"
+
+#include "Dispatcher.h"
 
 static const char *TAG = "webp";
 
+#define HTTP_QUERY_KEY_MAX_LEN  (64)
+
+extern Dispatcher disp;
+
+static esp_err_t dispatcher_control_get_handler(httpd_req_t *req);
 static esp_err_t system_info_get_handler(httpd_req_t *req);
 static esp_err_t mcu_restart_handler(httpd_req_t *req);
 static esp_err_t firmware_update_post_handler(httpd_req_t *req);
@@ -64,6 +72,19 @@ esp_err_t web_profile_start()
 
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+
+    /* URI handler for dispatcher control */
+    httpd_uri_t disp_ctl_get_uri = {
+        .uri = "/api/disp_ctl",
+        .method = HTTP_GET,
+        .handler = dispatcher_control_get_handler,
+        .user_ctx = &context
+    };
+    ret = httpd_register_uri_handler(server, &disp_ctl_get_uri);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "httpd_register_uri_handler failed with %d (%s)", ret, esp_err_to_name(ret));
+        return ret;
+    }
 
     /* URI handler for fetching system info */
     httpd_uri_t system_info_get_uri = {
@@ -167,6 +188,54 @@ void web_profile_client_disconnect(int *fd)
     if (mcu_restart_request) {
         esp_restart();
     }
+}
+
+static esp_err_t dispatcher_control_get_handler(httpd_req_t *req)
+{
+    size_t buf_len = httpd_req_get_url_query_len(req) + 1;
+    char *buf;
+    esp_err_t ret;
+
+    if (buf_len > 1) {
+        buf = (char *)calloc(1, buf_len);
+        if (buf == NULL) {
+            ESP_LOGE(TAG, "Failed to calloc memory for query string");
+            return ESP_ERR_NO_MEM;
+        }
+        if (httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+            char param[HTTP_QUERY_KEY_MAX_LEN], dec_param[HTTP_QUERY_KEY_MAX_LEN] = {0};
+            if (httpd_query_key_value(buf, "enable", param, sizeof(param)) == ESP_OK) {
+
+                example_uri_decode(dec_param, param, strnlen(param, HTTP_QUERY_KEY_MAX_LEN));
+                ESP_LOGI(TAG, "Decoded query parameter => %s", dec_param);
+
+                if (strcmp(dec_param, "1") == 0) {
+                    ret = disp.initDriver();
+                    if (ret == ESP_OK) {
+                        httpd_resp_sendstr(req, "Dispatcher enabled");
+                    } else {
+                        httpd_resp_send_500(req);
+                    }
+                } else if (strcmp(dec_param, "0") == 0) {
+                    ret = disp.deinitDriver();
+                    if (ret == ESP_OK) {
+                        httpd_resp_sendstr(req, "Dispatcher disabled");
+                    } else {
+                        httpd_resp_send_500(req);
+                    }
+                } else {
+                    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Incorrect query format");
+                }
+            } else {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Incorrect query format");
+            }
+        }
+        free(buf);
+    } else {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Incorrect query format");
+    }
+
+    return ESP_OK;
 }
 
 /* Getting system info handler */

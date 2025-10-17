@@ -38,6 +38,10 @@ esp_err_t Dispatcher::initDriver(void) {
     return ancs_init(this, &h); // ANCS driver is a singleton
 }
 
+esp_err_t Dispatcher::deinitDriver(void) {
+    return ancs_deinit(this);
+}
+
 static void disp_connect(void *ctx, uint8_t idx, uint8_t bda[6]) {
     Dispatcher *disp = static_cast<Dispatcher *>(ctx);
     disp->connectNP(idx, { bda[0], bda[1], bda[2], bda[3], bda[4], bda[5] });

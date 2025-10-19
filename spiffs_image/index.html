@@ -1,11 +1,15 @@
 <html>
+    <style>
+        iframe { width: 100%; border: 0; }
+    </style>
     <body>
         <h1>Nowa</h1>
         <p><a href="console.html">Console</a></p>
         <p><a href="log.html">Log</a></p>
-        <p><a href="api/system_info">System Info</a></p>
-        <p><a href="update.html">Update firmware</a></p>
+        <p>Dispatcher <a href="/api/disp_ctl?enable=1" target="frame">Enable</a>/<a href="/api/disp_ctl?enable=0" target="frame">Disable</a></p>
+        <p><a href="api/system_info" target="frame">System Info</a></p>
         <p><a href="api/mcu_restart" target="frame">MCU restart</a></p>
-        <iframe src="" name="frame" style="display: none"></iframe>
+        <p><a href="update.html">Update firmware</a></p>
+        <iframe src="" name="frame"></iframe>
     </body>
 </html>
